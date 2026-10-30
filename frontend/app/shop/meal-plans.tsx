@@ -49,6 +49,7 @@ type WeeklyPkg = {
 };
 type WeeklyMenu = {
   menu_id: string; title: string; package_enabled?: boolean; package?: WeeklyPkg | null;
+  alacarte_enabled?: boolean;
   items: MenuItem[]; complimentary_items?: MenuItem[];
 };
 
@@ -76,6 +77,10 @@ export default function ShopMealPlans() {
 
   const vegItems = (menu?.items || []).filter(i => (i.veg_type || "vegetarian") === "vegetarian");
   const nonVegItems = (menu?.items || []).filter(i => (i.veg_type || "vegetarian") !== "vegetarian");
+  // Package-only menus (alacarte off) have no à la carte listings: the dish
+  // sections below would show $0 dishes, so they stay hidden and the page
+  // shows only the package card. Old menus without the flag keep sections.
+  const showDishes = menu?.alacarte_enabled ?? true;
 
   const tiers = pkg && isComp ? [
     { label: `${pkg.veg_pick_count || pkg.pick_count} Veg`, price: pkg.veg_price_cents || 0 },
@@ -157,6 +162,9 @@ export default function ShopMealPlans() {
                 <Text style={styles.kicker}>{menu.title}</Text>
                 <Text style={styles.comboName}>{pkg.name}</Text>
                 <Text style={styles.comboDesc}>{pkg.description}</Text>
+                {!isComp && (
+                  <Text style={styles.flatPrice}>{centsToCAD(pkg.price_cents)} · for all {pkg.pick_count} items</Text>
+                )}
                 {isComp && (
                   <View style={[styles.tierRow, isNarrow && { flexDirection: "column" }]}>
                     {tiers.map(t => (
@@ -197,7 +205,7 @@ export default function ShopMealPlans() {
             )}
 
             {/* VEGETARIAN */}
-            {vegItems.length > 0 && (
+            {showDishes && vegItems.length > 0 && (
               <View style={[styles.section, { width: contentWidth }]}>
                 <View style={styles.groupHead}>
                   <View style={[styles.vegMark, { borderColor: VEG }]}><View style={[styles.vegDot, { backgroundColor: VEG }]} /></View>
@@ -209,7 +217,7 @@ export default function ShopMealPlans() {
             )}
 
             {/* NON-VEGETARIAN */}
-            {nonVegItems.length > 0 && (
+            {showDishes && nonVegItems.length > 0 && (
               <View style={[styles.section, { width: contentWidth }]}>
                 <View style={styles.groupHead}>
                   <View style={[styles.vegMark, { borderColor: NONVEG }]}><View style={[styles.vegDot, { backgroundColor: NONVEG }]} /></View>
@@ -265,6 +273,7 @@ const styles = StyleSheet.create({
   comboCard: { backgroundColor: "#fff", borderRadius: radius.xl, borderWidth: 1, borderColor: "#F0E6D8", padding: spacing.xl, gap: 8, ...shadows.soft },
   comboName: { fontSize: 28, fontWeight: "900", color: INK, letterSpacing: -0.5, marginTop: 2 },
   comboDesc: { fontSize: 15, color: MUTE, lineHeight: 22, maxWidth: 720 },
+  flatPrice: { fontSize: 22, fontWeight: "900", color: BLUE, marginTop: 6 },
   tierRow: { flexDirection: "row", gap: spacing.md, marginTop: spacing.md },
   tier: { flex: 1, minWidth: 150, backgroundColor: CREAM, borderRadius: radius.lg, borderWidth: 1, borderColor: "#EBDFCE", paddingVertical: spacing.md, alignItems: "center", gap: 4 },
   tierLabel: { fontSize: 14, fontWeight: "800", color: INK },

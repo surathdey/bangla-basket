@@ -237,11 +237,13 @@ export default function PackageCustomize() {
             )}
           </View>
           <Text style={styles.optDesc} numberOfLines={2}>{it.description}</Text>
-          <Text style={styles.optPrice}>
-            À la carte {centsToCAD(it.price_cents)}
-            {surcharge > 0 ? ` · +${centsToCAD(surcharge)} per portion in combo` : ""}
-            {atMax ? ` · max ${maxPer} reached` : ""}
-          </Text>
+          {it.price_cents > 0 && (
+            <Text style={styles.optPrice}>
+              À la carte {centsToCAD(it.price_cents)}
+              {surcharge > 0 ? ` · +${centsToCAD(surcharge)} per portion in combo` : ""}
+              {atMax ? ` · max ${maxPer} reached` : ""}
+            </Text>
+          )}
           {dimmed && (
             <Text style={styles.optBlocked} testID={`pkg-blocked-${it.item_id}`}>
               {isVeg ? "Adding veg no longer fits any plan" : "Adding non-veg no longer fits any plan"}
