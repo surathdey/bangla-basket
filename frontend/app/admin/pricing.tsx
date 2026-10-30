@@ -13,11 +13,13 @@ type Zone = {
   name: string;
   region?: string | null;
   postal_prefixes: string[];
+  cities?: string[];
+  fee_cents?: number | null;
   surcharge_cents: number;
   enabled: boolean;
 };
 
-const EMPTY: Zone = { name: "", region: "", postal_prefixes: [], surcharge_cents: 0, enabled: true };
+const EMPTY: Zone = { name: "", region: "", postal_prefixes: [], cities: [], fee_cents: null, surcharge_cents: 0, enabled: true };
 
 // Preferred display order for GTA regions; unknown regions sort after, alphabetically.
 const REGION_ORDER = ["City of Toronto", "Peel Region", "York Region", "Halton Region", "Durham Region"];
@@ -27,7 +29,9 @@ export default function AdminPricing() {
   const [loading, setLoading] = useState(true);
   const [edit, setEdit] = useState<Zone | null>(null);
   const [prefixText, setPrefixText] = useState("");
+  const [cityText, setCityText] = useState("");
   const [dollars, setDollars] = useState("");
+  const [feeDollars, setFeeDollars] = useState("");
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
@@ -38,22 +42,26 @@ export default function AdminPricing() {
   };
   useEffect(() => { load(); }, []);
 
-  const openNew = () => { setEdit({ ...EMPTY }); setPrefixText(""); setDollars(""); };
+  const openNew = () => { setEdit({ ...EMPTY }); setPrefixText(""); setCityText(""); setDollars(""); setFeeDollars(""); };
   const openEdit = (z: Zone) => {
     setEdit({ ...z });
     setPrefixText((z.postal_prefixes || []).join(", "));
+    setCityText((z.cities || []).join(", "));
     setDollars((z.surcharge_cents / 100).toFixed(2));
+    setFeeDollars(z.fee_cents != null ? (z.fee_cents / 100).toFixed(2) : "");
   };
 
   const save = async () => {
     if (!edit) return;
     const prefixes = prefixText.split(/[\s,]+/).map(s => s.trim().toUpperCase()).filter(Boolean);
+    const cities = cityText.split(",").map(s => s.trim()).filter(Boolean);
     const cents = Math.round((parseFloat(dollars) || 0) * 100);
+    const feeCents = feeDollars.trim() === "" ? null : Math.round((parseFloat(feeDollars) || 0) * 100);
     if (!edit.name.trim()) { if (Platform.OS === "web") window.alert("Zone name is required."); return; }
     setSaving(true);
     const r = await adminApi.post("/admin/pricing-zones", {
       zone_id: edit.zone_id, name: edit.name.trim(), region: (edit.region || "").trim(),
-      postal_prefixes: prefixes, surcharge_cents: cents, enabled: edit.enabled,
+      postal_prefixes: prefixes, cities, fee_cents: feeCents, surcharge_cents: cents, enabled: edit.enabled,
     });
     setSaving(false);
     if (r.ok) { setEdit(null); await load(); }
@@ -88,7 +96,7 @@ export default function AdminPricing() {
   return (
     <AdminShell title="Pricing Zones">
       <View style={styles.introRow}>
-        <Text style={styles.intro}>Add a fixed surcharge to grocery prices based on the customer&apos;s detected location (by postal-code prefix). Base prices stay in the catalog; customers see the adjusted price automatically.</Text>
+        <Text style={styles.intro}>Zones do two things: a fixed surcharge on grocery prices (by postal-code prefix), and a flat delivery fee for the zone&apos;s cities (orders from a listed city are charged that fee instead of the distance rate, and orders from cities in no zone are rejected). Base prices stay in the catalog; customers see the adjusted price automatically.</Text>
         <TouchableOpacity testID="new-zone-btn" style={styles.primaryBtn} onPress={openNew}>
           <Ionicons name="add" size={18} color="#fff" /><Text style={styles.primaryBtnText}>New zone</Text>
         </TouchableOpacity>
@@ -101,7 +109,7 @@ export default function AdminPricing() {
       ) : (
         <View style={{ gap: spacing.lg, marginTop: spacing.md }}>
           {sections.map(sec => {
-            const priced = sec.zones.filter(z => z.surcharge_cents > 0).length;
+            const priced = sec.zones.filter(z => z.surcharge_cents > 0 || z.fee_cents != null).length;
             return (
               <View key={sec.region} style={{ gap: spacing.sm }} testID={`region-${sec.region}`}>
                 <View style={styles.sectionHead}>
@@ -118,6 +126,12 @@ export default function AdminPricing() {
                       </View>
                       <Text style={styles.zoneMeta} numberOfLines={2}>
                         {(z.postal_prefixes || []).length} postal areas: {(z.postal_prefixes || []).join(", ") || "—"}
+                      </Text>
+                      <Text style={styles.zoneMeta} numberOfLines={3}>
+                        {(z.cities || []).length} cities: {(z.cities || []).join(", ") || "—"}
+                      </Text>
+                      <Text style={[styles.zonePrice, z.fee_cents == null && { color: colors.textMuted }]}>
+                        {z.fee_cents != null ? `Delivery fee: CA$${(z.fee_cents / 100).toFixed(2)}` : "No flat delivery fee"}
                       </Text>
                       <Text style={[styles.zonePrice, z.surcharge_cents === 0 && { color: colors.textMuted }]}>
                         {z.surcharge_cents > 0 ? `+CA$${(z.surcharge_cents / 100).toFixed(2)} per item` : "No surcharge — tap edit to set a price"}
@@ -144,6 +158,10 @@ export default function AdminPricing() {
           <TextInput testID="zone-region" style={styles.input} value={edit.region || ""} onChangeText={t => setEdit({ ...edit, region: t })} placeholder="e.g., Peel Region" placeholderTextColor={colors.textMuted} />
           <Text style={styles.label}>Postal-code prefixes (comma or space separated)</Text>
           <TextInput testID="zone-prefixes" style={styles.input} value={prefixText} onChangeText={setPrefixText} placeholder="e.g., L4, L5" placeholderTextColor={colors.textMuted} autoCapitalize="characters" />
+          <Text style={styles.label}>Cities (comma separated — delivery area + flat fee applies to these)</Text>
+          <TextInput testID="zone-cities" style={styles.input} value={cityText} onChangeText={setCityText} placeholder="e.g., Mississauga, Milton, Brampton" placeholderTextColor={colors.textMuted} />
+          <Text style={styles.label}>Delivery fee for these cities (CA$ — blank = no flat fee, distance rate applies)</Text>
+          <TextInput testID="zone-fee" style={styles.input} value={feeDollars} onChangeText={setFeeDollars} placeholder="5.00" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" />
           <Text style={styles.label}>Surcharge per item (CA$)</Text>
           <TextInput testID="zone-surcharge" style={styles.input} value={dollars} onChangeText={setDollars} placeholder="1.50" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" />
           <View style={styles.switchRow}>
