@@ -1,0 +1,836 @@
+[
+ {
+  "line": 146,
+  "method": "GET",
+  "path": "/files/{path:path}",
+  "handler": "serve_object"
+ },
+ {
+  "line": 758,
+  "method": "POST",
+  "path": "/auth/guest",
+  "handler": "create_guest_session"
+ },
+ {
+  "line": 780,
+  "method": "POST",
+  "path": "/auth/session",
+  "handler": "create_session"
+ },
+ {
+  "line": 823,
+  "method": "GET",
+  "path": "/auth/me",
+  "handler": "me"
+ },
+ {
+  "line": 828,
+  "method": "POST",
+  "path": "/auth/logout",
+  "handler": "logout"
+ },
+ {
+  "line": 965,
+  "method": "POST",
+  "path": "/auth/email/signup",
+  "handler": "email_signup"
+ },
+ {
+  "line": 995,
+  "method": "POST",
+  "path": "/auth/email/login",
+  "handler": "email_login"
+ },
+ {
+  "line": 1010,
+  "method": "POST",
+  "path": "/auth/password/forgot",
+  "handler": "password_forgot"
+ },
+ {
+  "line": 1039,
+  "method": "POST",
+  "path": "/auth/password/reset",
+  "handler": "password_reset"
+ },
+ {
+  "line": 1063,
+  "method": "DELETE",
+  "path": "/user/me",
+  "handler": "delete_my_account"
+ },
+ {
+  "line": 1098,
+  "method": "POST",
+  "path": "/me/address",
+  "handler": "save_default_address"
+ },
+ {
+  "line": 1108,
+  "method": "DELETE",
+  "path": "/me/address",
+  "handler": "clear_default_address"
+ },
+ {
+  "line": 1117,
+  "method": "GET",
+  "path": "/places/autocomplete",
+  "handler": "places_autocomplete"
+ },
+ {
+  "line": 1157,
+  "method": "GET",
+  "path": "/places/details",
+  "handler": "places_details"
+ },
+ {
+  "line": 1288,
+  "method": "GET",
+  "path": "/menu/current",
+  "handler": "menu_current"
+ },
+ {
+  "line": 1305,
+  "method": "GET",
+  "path": "/menu/upcoming",
+  "handler": "menu_upcoming"
+ },
+ {
+  "line": 1316,
+  "method": "GET",
+  "path": "/menu/history",
+  "handler": "menu_history"
+ },
+ {
+  "line": 1322,
+  "method": "GET",
+  "path": "/menu/anytime",
+  "handler": "menu_anytime"
+ },
+ {
+  "line": 1362,
+  "method": "POST",
+  "path": "/menu/upsert",
+  "handler": "menu_upsert"
+ },
+ {
+  "line": 1372,
+  "method": "GET",
+  "path": "/catering",
+  "handler": "catering_list"
+ },
+ {
+  "line": 1378,
+  "method": "GET",
+  "path": "/catering/{package_id}",
+  "handler": "catering_detail"
+ },
+ {
+  "line": 1404,
+  "method": "GET",
+  "path": "/thali",
+  "handler": "thali_list"
+ },
+ {
+  "line": 1410,
+  "method": "GET",
+  "path": "/thali/{package_id}",
+  "handler": "thali_detail"
+ },
+ {
+  "line": 1418,
+  "method": "POST",
+  "path": "/catering/quote-request",
+  "handler": "catering_quote_request"
+ },
+ {
+  "line": 1500,
+  "method": "GET",
+  "path": "/grocery/categories",
+  "handler": "grocery_categories"
+ },
+ {
+  "line": 1514,
+  "method": "GET",
+  "path": "/grocery/subcategories",
+  "handler": "grocery_subcategories"
+ },
+ {
+  "line": 1528,
+  "method": "GET",
+  "path": "/grocery",
+  "handler": "grocery_list"
+ },
+ {
+  "line": 1574,
+  "method": "GET",
+  "path": "/grocery/{item_id}",
+  "handler": "grocery_detail"
+ },
+ {
+  "line": 1583,
+  "method": "GET",
+  "path": "/grocery/{item_id}/related",
+  "handler": "grocery_related"
+ },
+ {
+  "line": 1631,
+  "method": "POST",
+  "path": "/pricing/resolve",
+  "handler": "pricing_resolve"
+ },
+ {
+  "line": 1661,
+  "method": "GET",
+  "path": "/coupons/{code}",
+  "handler": "coupon_lookup"
+ },
+ {
+  "line": 2228,
+  "method": "POST",
+  "path": "/orders/quote",
+  "handler": "order_quote"
+ },
+ {
+  "line": 2283,
+  "method": "POST",
+  "path": "/orders",
+  "handler": "create_order"
+ },
+ {
+  "line": 2452,
+  "method": "GET",
+  "path": "/orders",
+  "handler": "list_my_orders"
+ },
+ {
+  "line": 2464,
+  "method": "GET",
+  "path": "/orders/{order_id}",
+  "handler": "get_order"
+ },
+ {
+  "line": 2472,
+  "method": "POST",
+  "path": "/orders/{order_id}/cancel-unpaid",
+  "handler": "cancel_unpaid_order"
+ },
+ {
+  "line": 2512,
+  "method": "POST",
+  "path": "/checkout/session",
+  "handler": "create_checkout_session"
+ },
+ {
+  "line": 2566,
+  "method": "GET",
+  "path": "/checkout/status/{session_id}",
+  "handler": "checkout_status"
+ },
+ {
+  "line": 2588,
+  "method": "POST",
+  "path": "/checkout/webhook",
+  "handler": "checkout_webhook"
+ },
+ {
+  "line": 2689,
+  "method": "POST",
+  "path": "/orders/{order_id}/status",
+  "handler": "update_order_status"
+ },
+ {
+  "line": 2723,
+  "method": "POST",
+  "path": "/delivery-partner/apply",
+  "handler": "apply_delivery"
+ },
+ {
+  "line": 2738,
+  "method": "POST",
+  "path": "/register-push",
+  "handler": "register_push"
+ },
+ {
+  "line": 2752,
+  "method": "GET",
+  "path": "/",
+  "handler": "root"
+ },
+ {
+  "line": 2955,
+  "method": "POST",
+  "path": "/dev/seed",
+  "handler": "seed"
+ },
+ {
+  "line": 3270,
+  "method": "POST",
+  "path": "/admin/login",
+  "handler": "admin_login"
+ },
+ {
+  "line": 3284,
+  "method": "GET",
+  "path": "/admin/me",
+  "handler": "admin_me"
+ },
+ {
+  "line": 3290,
+  "method": "GET",
+  "path": "/admin/menus",
+  "handler": "admin_list_menus"
+ },
+ {
+  "line": 3296,
+  "method": "POST",
+  "path": "/admin/menus",
+  "handler": "admin_upsert_menu"
+ },
+ {
+  "line": 3305,
+  "method": "DELETE",
+  "path": "/admin/menus/{week_start}",
+  "handler": "admin_delete_menu"
+ },
+ {
+  "line": 3315,
+  "method": "POST",
+  "path": "/admin/menus/{week_start}/items",
+  "handler": "admin_add_menu_item"
+ },
+ {
+  "line": 3337,
+  "method": "DELETE",
+  "path": "/admin/menus/{week_start}/items/{item_id}",
+  "handler": "admin_delete_menu_item"
+ },
+ {
+  "line": 3347,
+  "method": "GET",
+  "path": "/admin/catering",
+  "handler": "admin_list_catering"
+ },
+ {
+  "line": 3353,
+  "method": "POST",
+  "path": "/admin/catering",
+  "handler": "admin_upsert_catering"
+ },
+ {
+  "line": 3362,
+  "method": "DELETE",
+  "path": "/admin/catering/{package_id}",
+  "handler": "admin_delete_catering"
+ },
+ {
+  "line": 3369,
+  "method": "GET",
+  "path": "/admin/thali",
+  "handler": "admin_list_thali"
+ },
+ {
+  "line": 3375,
+  "method": "POST",
+  "path": "/admin/thali",
+  "handler": "admin_upsert_thali"
+ },
+ {
+  "line": 3382,
+  "method": "DELETE",
+  "path": "/admin/thali/{package_id}",
+  "handler": "admin_delete_thali"
+ },
+ {
+  "line": 3389,
+  "method": "GET",
+  "path": "/admin/grocery",
+  "handler": "admin_list_grocery"
+ },
+ {
+  "line": 3416,
+  "method": "POST",
+  "path": "/admin/grocery",
+  "handler": "admin_upsert_grocery"
+ },
+ {
+  "line": 3430,
+  "method": "DELETE",
+  "path": "/admin/grocery/{item_id}",
+  "handler": "admin_delete_grocery"
+ },
+ {
+  "line": 3446,
+  "method": "GET",
+  "path": "/admin/export/meal-plan",
+  "handler": "admin_export_meal_plan"
+ },
+ {
+  "line": 3461,
+  "method": "POST",
+  "path": "/admin/import/meal-plan",
+  "handler": "admin_import_meal_plan"
+ },
+ {
+  "line": 3490,
+  "method": "GET",
+  "path": "/admin/pricing-zones",
+  "handler": "admin_list_zones"
+ },
+ {
+  "line": 3496,
+  "method": "POST",
+  "path": "/admin/pricing-zones",
+  "handler": "admin_upsert_zone"
+ },
+ {
+  "line": 3510,
+  "method": "DELETE",
+  "path": "/admin/pricing-zones/{zone_id}",
+  "handler": "admin_delete_zone"
+ },
+ {
+  "line": 3522,
+  "method": "POST",
+  "path": "/admin/grocery/bulk-recategorize",
+  "handler": "admin_grocery_bulk_recategorize"
+ },
+ {
+  "line": 3546,
+  "method": "POST",
+  "path": "/admin/grocery/upload-image",
+  "handler": "admin_grocery_upload_image"
+ },
+ {
+  "line": 3566,
+  "method": "POST",
+  "path": "/admin/grocery/bulk-import",
+  "handler": "admin_grocery_bulk_import"
+ },
+ {
+  "line": 3580,
+  "method": "GET",
+  "path": "/admin/grocery/template",
+  "handler": "admin_grocery_download_template"
+ },
+ {
+  "line": 3596,
+  "method": "POST",
+  "path": "/admin/grocery/upload-template",
+  "handler": "admin_grocery_upload_template"
+ },
+ {
+  "line": 3695,
+  "method": "POST",
+  "path": "/admin/grocery/import-from-store",
+  "handler": "admin_grocery_import_from_store"
+ },
+ {
+  "line": 3726,
+  "method": "GET",
+  "path": "/admin/orders",
+  "handler": "admin_list_orders"
+ },
+ {
+  "line": 3760,
+  "method": "POST",
+  "path": "/admin/orders/{order_id}/status",
+  "handler": "admin_update_order_status"
+ },
+ {
+  "line": 3792,
+  "method": "GET",
+  "path": "/admin/stats",
+  "handler": "admin_stats"
+ },
+ {
+  "line": 3819,
+  "method": "GET",
+  "path": "/brand",
+  "handler": "brand_info"
+ },
+ {
+  "line": 3827,
+  "method": "GET",
+  "path": "/platform/status",
+  "handler": "platform_status"
+ },
+ {
+  "line": 3857,
+  "method": "GET",
+  "path": "/admin/billing/summary",
+  "handler": "admin_billing_summary"
+ },
+ {
+  "line": 3865,
+  "method": "POST",
+  "path": "/admin/billing/subscribe",
+  "handler": "admin_billing_subscribe"
+ },
+ {
+  "line": 3876,
+  "method": "POST",
+  "path": "/admin/billing/portal",
+  "handler": "admin_billing_portal"
+ },
+ {
+  "line": 3886,
+  "method": "GET",
+  "path": "/settings",
+  "handler": "public_settings"
+ },
+ {
+  "line": 3941,
+  "method": "GET",
+  "path": "/admin/settings",
+  "handler": "admin_get_settings"
+ },
+ {
+  "line": 3946,
+  "method": "PUT",
+  "path": "/admin/settings",
+  "handler": "admin_put_settings"
+ },
+ {
+  "line": 3954,
+  "method": "GET",
+  "path": "/admin/master-menu",
+  "handler": "admin_master_list"
+ },
+ {
+  "line": 3975,
+  "method": "GET",
+  "path": "/admin/master-menu/{item_id}",
+  "handler": "admin_master_get"
+ },
+ {
+  "line": 3983,
+  "method": "POST",
+  "path": "/admin/master-menu",
+  "handler": "admin_master_upsert"
+ },
+ {
+  "line": 4005,
+  "method": "POST",
+  "path": "/admin/master-menu/bulk-preview",
+  "handler": "admin_master_bulk_preview"
+ },
+ {
+  "line": 4064,
+  "method": "POST",
+  "path": "/admin/master-menu/bulk-save",
+  "handler": "admin_master_bulk_save"
+ },
+ {
+  "line": 4079,
+  "method": "POST",
+  "path": "/admin/master-menu/{item_id}/duplicate",
+  "handler": "admin_master_duplicate"
+ },
+ {
+  "line": 4092,
+  "method": "DELETE",
+  "path": "/admin/master-menu/{item_id}",
+  "handler": "admin_master_delete"
+ },
+ {
+  "line": 4103,
+  "method": "POST",
+  "path": "/admin/master-menu/bulk",
+  "handler": "admin_master_bulk"
+ },
+ {
+  "line": 4122,
+  "method": "POST",
+  "path": "/admin/menus/{week_start}/lines",
+  "handler": "admin_add_weekly_line"
+ },
+ {
+  "line": 4143,
+  "method": "DELETE",
+  "path": "/admin/menus/{week_start}/lines/{line_id}",
+  "handler": "admin_delete_weekly_line"
+ },
+ {
+  "line": 4158,
+  "method": "POST",
+  "path": "/admin/menus/{week_start}/settings",
+  "handler": "admin_update_weekly_settings"
+ },
+ {
+  "line": 4190,
+  "method": "POST",
+  "path": "/admin/menus/create",
+  "handler": "admin_create_week"
+ },
+ {
+  "line": 4227,
+  "method": "POST",
+  "path": "/admin/menus/{week_start}/complimentary",
+  "handler": "admin_set_complimentary"
+ },
+ {
+  "line": 4246,
+  "method": "POST",
+  "path": "/admin/menus/{week_start}/lines/{line_id}/visibility",
+  "handler": "admin_set_line_visibility"
+ },
+ {
+  "line": 4264,
+  "method": "GET",
+  "path": "/admin/always-available",
+  "handler": "admin_get_always_available"
+ },
+ {
+  "line": 4271,
+  "method": "POST",
+  "path": "/admin/always-available",
+  "handler": "admin_set_always_available"
+ },
+ {
+  "line": 4285,
+  "method": "POST",
+  "path": "/admin/orders/{order_id}/refund",
+  "handler": "admin_refund_order"
+ },
+ {
+  "line": 4331,
+  "method": "GET",
+  "path": "/admin/coupons",
+  "handler": "admin_list_coupons"
+ },
+ {
+  "line": 4337,
+  "method": "POST",
+  "path": "/admin/coupons",
+  "handler": "admin_upsert_coupon"
+ },
+ {
+  "line": 4360,
+  "method": "DELETE",
+  "path": "/admin/coupons/{code}",
+  "handler": "admin_delete_coupon"
+ },
+ {
+  "line": 4369,
+  "method": "GET",
+  "path": "/me/coupons",
+  "handler": "my_coupons"
+ },
+ {
+  "line": 4404,
+  "method": "GET",
+  "path": "/me/points-history",
+  "handler": "my_points_history"
+ },
+ {
+  "line": 4526,
+  "method": "GET",
+  "path": "/admin/integrations",
+  "handler": "admin_get_integrations"
+ },
+ {
+  "line": 4567,
+  "method": "PUT",
+  "path": "/admin/integrations/email",
+  "handler": "admin_save_email_settings"
+ },
+ {
+  "line": 4578,
+  "method": "POST",
+  "path": "/admin/integrations/email/test",
+  "handler": "admin_test_email"
+ },
+ {
+  "line": 4616,
+  "method": "PUT",
+  "path": "/admin/integrations/google-drive",
+  "handler": "admin_save_drive_settings"
+ },
+ {
+  "line": 4641,
+  "method": "POST",
+  "path": "/admin/integrations/google-drive/test",
+  "handler": "admin_test_drive"
+ },
+ {
+  "line": 4671,
+  "method": "PUT",
+  "path": "/admin/integrations/twilio",
+  "handler": "admin_save_twilio_settings"
+ },
+ {
+  "line": 4688,
+  "method": "POST",
+  "path": "/admin/integrations/twilio/test",
+  "handler": "admin_test_twilio"
+ },
+ {
+  "line": 4915,
+  "method": "POST",
+  "path": "/admin/orders/export",
+  "handler": "admin_export_orders"
+ },
+ {
+  "line": 4959,
+  "method": "POST",
+  "path": "/admin/customers",
+  "handler": "admin_create_customer"
+ },
+ {
+  "line": 4991,
+  "method": "GET",
+  "path": "/admin/order-builder",
+  "handler": "admin_order_builder"
+ },
+ {
+  "line": 5119,
+  "method": "POST",
+  "path": "/admin/orders/create",
+  "handler": "admin_create_manual_order"
+ },
+ {
+  "line": 5311,
+  "method": "GET",
+  "path": "/admin/customers",
+  "handler": "admin_list_customers"
+ },
+ {
+  "line": 5325,
+  "method": "GET",
+  "path": "/admin/customers/{user_id}",
+  "handler": "admin_customer_detail"
+ },
+ {
+  "line": 5344,
+  "method": "POST",
+  "path": "/admin/customers/export",
+  "handler": "admin_export_customers"
+ },
+ {
+  "line": 5671,
+  "method": "POST",
+  "path": "/admin/delivery-partners",
+  "handler": "admin_create_partner"
+ },
+ {
+  "line": 5683,
+  "method": "GET",
+  "path": "/admin/delivery-partners",
+  "handler": "admin_list_partners"
+ },
+ {
+  "line": 5696,
+  "method": "PATCH",
+  "path": "/admin/delivery-partners/{partner_id}",
+  "handler": "admin_update_partner"
+ },
+ {
+  "line": 5714,
+  "method": "DELETE",
+  "path": "/admin/delivery-partners/{partner_id}",
+  "handler": "admin_delete_partner"
+ },
+ {
+  "line": 5734,
+  "method": "POST",
+  "path": "/admin/orders/{order_id}/assign",
+  "handler": "admin_assign_order"
+ },
+ {
+  "line": 5772,
+  "method": "POST",
+  "path": "/delivery/login",
+  "handler": "delivery_login"
+ },
+ {
+  "line": 5797,
+  "method": "GET",
+  "path": "/delivery/me",
+  "handler": "delivery_me"
+ },
+ {
+  "line": 5811,
+  "method": "POST",
+  "path": "/delivery/geocode",
+  "handler": "delivery_geocode"
+ },
+ {
+  "line": 5822,
+  "method": "POST",
+  "path": "/delivery/reverse-geocode",
+  "handler": "delivery_reverse_geocode"
+ },
+ {
+  "line": 5831,
+  "method": "GET",
+  "path": "/delivery/orders",
+  "handler": "delivery_list_orders"
+ },
+ {
+  "line": 5858,
+  "method": "POST",
+  "path": "/delivery/location",
+  "handler": "delivery_update_location"
+ },
+ {
+  "line": 6191,
+  "method": "POST",
+  "path": "/delivery/orders/{order_id}/proof",
+  "handler": "delivery_upload_proof"
+ },
+ {
+  "line": 6211,
+  "method": "POST",
+  "path": "/delivery/orders/{order_id}/status",
+  "handler": "delivery_update_order_status"
+ },
+ {
+  "line": 6282,
+  "method": "POST",
+  "path": "/delivery/journey/start",
+  "handler": "delivery_start_journey"
+ },
+ {
+  "line": 6387,
+  "method": "POST",
+  "path": "/delivery/journey/end",
+  "handler": "delivery_end_journey"
+ },
+ {
+  "line": 6401,
+  "method": "GET",
+  "path": "/delivery/journey/current",
+  "handler": "delivery_current_journey"
+ },
+ {
+  "line": 6428,
+  "method": "POST",
+  "path": "/delivery/route",
+  "handler": "delivery_optimize_route"
+ },
+ {
+  "line": 6514,
+  "method": "GET",
+  "path": "/orders/{order_id}/tracking",
+  "handler": "order_tracking"
+ },
+ {
+  "line": 6586,
+  "method": "GET",
+  "path": "/downloads/pitch-deck",
+  "handler": "download_pitch_deck"
+ },
+ {
+  "line": 6603,
+  "method": "GET",
+  "path": "/legal/privacy",
+  "handler": "public_privacy_policy"
+ },
+ {
+  "line": 6613,
+  "method": "GET",
+  "path": "/health/web-bundle",
+  "handler": "health_web_bundle"
+ }
+]

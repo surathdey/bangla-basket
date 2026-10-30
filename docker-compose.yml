@@ -1,0 +1,75 @@
+# Bangla Basket -- parallel-test stack (Phase 3, LOCAL ONLY).
+#
+# This stack is designed to run ALONGSIDE the live deployment on the same
+# AWS instance without touching it:
+#   * No host port conflicts: nginx publishes 8080 (not 80/443 -- the live
+#     nginx owns those until cutover), and postgres / minio / backend are
+#     reachable only inside the Docker network.
+#   * At cutover (a future, separately approved step), nginx's published
+#     ports change to 80:80/443:443 with TLS, and the live systemd service
+#     stops. Nothing in this file touches the live service.
+#
+# Usage (on the target box, after Docker is installed -- see README):
+#   cp .env.example .env   # then fill in real values (never commit .env)
+#   docker compose up -d --build
+#   curl localhost:8080/api/brand   # or any public route
+#   docker compose logs -f backend
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-bangla}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bangla}
+      POSTGRES_DB: ${POSTGRES_DB:-banglabasket}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-bangla}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-bangla-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-change-me-minio-password}
+    volumes:
+      - miniodata:/data
+    # No health gate: the backend retries object-storage init lazily, and
+    # a failed minio healthcheck must never block the API from starting.
+
+  backend:
+    build: .
+    env_file:
+      - .env
+    environment:
+      # Compose service names win over .env.example's localhost values.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-bangla}:${POSTGRES_PASSWORD:-bangla}@postgres:5432/${POSTGRES_DB:-banglabasket}
+      MINIO_ENDPOINT: http://minio:9000
+    volumes:
+      - uploads:/app/backend/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    # No published port on purpose: reach the API through nginx:8080, or
+    # add "8002:8001" temporarily for direct backend parity testing.
+
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      # PARALLEL-TEST port. At cutover this becomes "80:80" (+ "443:443"
+      # with a TLS block -- see nginx.conf notes).
+      - "8080:80"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  miniodata:
+  uploads:

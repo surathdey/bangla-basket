@@ -1,0 +1,21 @@
+{
+  "key": "bongconnekt",
+  "name": "Bangla Basket",
+  "legal_name": "Bangla Basket",
+  "email_from": "orders@bongconnekt.ca",
+  "admin_email": "admin@bongconnekt.ca",
+  "support_email": "support@bongconnekt.ca",
+  "guest_email_domain": "guest.bongconnekt.ca",
+  "delivery_admin_email": "delivery@bongconnekt.ca",
+  "region": {
+    "country": "CA",
+    "currency": "CAD",
+    "timezone": "America/Toronto"
+  },
+  "platform": {
+    "tenant_id": "tnt_264dfe34083a",
+    "api_key": "",
+    "status_url": "https://control-plane-11.preview.emergentagent.com/api/tenant/status",
+    "poll_seconds": 300
+  }
+}
