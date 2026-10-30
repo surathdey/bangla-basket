@@ -87,5 +87,5 @@ async def send_sms(sid: str, encrypted_auth_token: str, from_number: str,
 
 async def send_test_sms(sid: str, encrypted_auth_token: str, from_number: str,
                         to_number: str) -> dict:
-    body = "Curry & Co. test SMS — Twilio integration is working. Reply STOP to unsubscribe."
+    body = "Bangla Basket test SMS — Twilio integration is working. Reply STOP to unsubscribe."
     return await send_sms(sid, encrypted_auth_token, from_number, to_number, body)
