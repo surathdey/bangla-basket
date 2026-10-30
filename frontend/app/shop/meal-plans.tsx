@@ -9,6 +9,7 @@ import Ionicons from "@react-native-vector-icons/ionicons";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@/src/api";
+import { useCart } from "@/src/cart";
 import { mediaUrl } from "@/src/utils/backendUrl";
 import { spacing, radius, shadows } from "@/src/theme";
 import { centsToCAD } from "@/src/utils/format";
@@ -43,7 +44,7 @@ type MenuItem = {
 };
 type WeeklyPkg = {
   name: string; description?: string; image_url?: string; pricing_mode?: string;
-  pick_count: number; price_cents: number;
+  pick_count: number; price_cents: number; max_per_dish?: number;
   veg_price_cents?: number; mixed_price_cents?: number; nonveg_price_cents?: number;
   veg_pick_count?: number; nonveg_pick_count?: number; mixed_veg_count?: number; mixed_nonveg_count?: number;
 };
@@ -57,6 +58,7 @@ export default function ShopMealPlans() {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { add } = useCart();
   const [menu, setMenu] = useState<WeeklyMenu | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -75,6 +77,36 @@ export default function ShopMealPlans() {
   const isComp = pkg?.pricing_mode === "composition";
   const build = () => menu && router.push(`/menu/package/${menu.menu_id}?from=shop`);
 
+  // Fixed bundle: flat price, pick_count == every dish, max 1 each — the
+  // bundle IS all dishes, so there is nothing to pick. The page itself
+  // becomes the order page (old-app layout): dishes listed below with
+  // disabled steppers, one "Order this week's plan" button, no second click.
+  const fixedItems = menu?.items || [];
+  const isFixedBundle = !isComp && !!pkg && (pkg.pick_count || 0) > 0
+    && fixedItems.length === pkg.pick_count && (pkg.max_per_dish || 0) === 1;
+  const fixedVeg = fixedItems.filter(i => (i.veg_type || "vegetarian") === "vegetarian");
+  const fixedNonVeg = fixedItems.filter(i => (i.veg_type || "vegetarian") !== "vegetarian");
+  const orderFixed = () => {
+    if (!menu || !pkg || !isFixedBundle) return;
+    const ids = fixedItems.map(i => i.item_id);
+    const names = fixedItems.map(i => i.name);
+    add({
+      kind: "weekly_package",
+      ref_id: menu.menu_id,
+      name: pkg.name,
+      price_cents: pkg.price_cents,
+      image_url: pkg.image_url || "",
+      package_selections: ids,
+      package_selection_names: names,
+      package_pick_count: ids.length,
+      weekly_menu_id: menu.menu_id,
+      selection_labels: [{ title: "This week's plan", items: names }],
+    });
+    router.push("/shop/cart");
+  };
+  const primaryAction = isFixedBundle ? orderFixed : build;
+  const primaryLabel = isFixedBundle ? "Order this week's plan" : "Build your plan";
+
   const vegItems = (menu?.items || []).filter(i => (i.veg_type || "vegetarian") === "vegetarian");
   const nonVegItems = (menu?.items || []).filter(i => (i.veg_type || "vegetarian") !== "vegetarian");
   // Package-only menus (alacarte off) have no à la carte listings: the dish
@@ -89,6 +121,36 @@ export default function ShopMealPlans() {
       : []),
     { label: `${pkg.nonveg_pick_count || pkg.pick_count} Non-Veg`, price: pkg.nonveg_price_cents || 0 },
   ] : [];
+
+  // Fixed-bundle dish row (old-app layout): photo, name, description, and a
+  // DISABLED stepper showing 1 — the dish is included, it cannot be picked.
+  const FixedDishRow = ({ it }: { it: MenuItem }) => {
+    const isVeg = (it.veg_type || "vegetarian") === "vegetarian";
+    return (
+      <View style={styles.fixedRow} testID={`mp-fixed-${it.item_id}`}>
+        <View style={styles.fixedImgWrap}>
+          {it.image_url
+            ? <Image source={{ uri: mediaUrl(it.image_url) }} style={styles.fixedImg} contentFit="cover" transition={200} />
+            : <View style={[styles.fixedImg, { alignItems: "center", justifyContent: "center" }]}><Ionicons name="image-outline" size={24} color={MUTE} /></View>}
+        </View>
+        <View style={{ flex: 1, gap: 2 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <View style={[styles.vegMark, { borderColor: isVeg ? VEG : NONVEG }]}>
+              <View style={[styles.vegDot, { backgroundColor: isVeg ? VEG : NONVEG }]} />
+            </View>
+            <Text style={styles.dishName} numberOfLines={1}>{it.name}</Text>
+          </View>
+          {!!it.description && <Text style={styles.dishDesc} numberOfLines={2}>{it.description}</Text>}
+          <Text style={styles.fixedIncluded}>Included in this week's plan</Text>
+        </View>
+        <View style={[styles.fixedStepper, { opacity: 0.45 }]}>
+          <View style={styles.fixedStepBtn}><Text style={styles.fixedStepText}>−</Text></View>
+          <Text style={styles.fixedQty}>1</Text>
+          <View style={styles.fixedStepBtn}><Text style={styles.fixedStepText}>+</Text></View>
+        </View>
+      </View>
+    );
+  };
 
   const DishCard = ({ it }: { it: MenuItem }) => {
     const isVeg = (it.veg_type || "vegetarian") === "vegetarian";
@@ -133,8 +195,8 @@ export default function ShopMealPlans() {
                 Build your own combo from this week&apos;s home-style Bengali menu — choose veg, non-veg or a mix.
               </Text>
               {pkg && (
-                <TouchableOpacity testID="mp-hero-build" style={styles.ctaPrimary} onPress={build}>
-                  <Text style={styles.ctaPrimaryText}>Build your plan</Text>
+                <TouchableOpacity testID="mp-hero-build" style={styles.ctaPrimary} onPress={primaryAction}>
+                  <Text style={styles.ctaPrimaryText}>{primaryLabel}</Text>
                   <Ionicons name="arrow-forward" size={18} color="#fff" />
                 </TouchableOpacity>
               )}
@@ -175,8 +237,8 @@ export default function ShopMealPlans() {
                     ))}
                   </View>
                 )}
-                <TouchableOpacity testID="mp-combo-build" style={styles.ctaPrimaryDark} onPress={build}>
-                  <Text style={styles.ctaPrimaryText}>Build your plan</Text>
+                <TouchableOpacity testID="mp-combo-build" style={styles.ctaPrimaryDark} onPress={primaryAction}>
+                  <Text style={styles.ctaPrimaryText}>{primaryLabel}</Text>
                   <Ionicons name="arrow-forward" size={18} color="#fff" />
                 </TouchableOpacity>
               </View>
@@ -205,7 +267,7 @@ export default function ShopMealPlans() {
             )}
 
             {/* VEGETARIAN */}
-            {showDishes && vegItems.length > 0 && (
+            {showDishes && !isFixedBundle && vegItems.length > 0 && (
               <View style={[styles.section, { width: contentWidth }]}>
                 <View style={styles.groupHead}>
                   <View style={[styles.vegMark, { borderColor: VEG }]}><View style={[styles.vegDot, { backgroundColor: VEG }]} /></View>
@@ -217,7 +279,7 @@ export default function ShopMealPlans() {
             )}
 
             {/* NON-VEGETARIAN */}
-            {showDishes && nonVegItems.length > 0 && (
+            {showDishes && !isFixedBundle && nonVegItems.length > 0 && (
               <View style={[styles.section, { width: contentWidth }]}>
                 <View style={styles.groupHead}>
                   <View style={[styles.vegMark, { borderColor: NONVEG }]}><View style={[styles.vegDot, { backgroundColor: NONVEG }]} /></View>
@@ -228,10 +290,36 @@ export default function ShopMealPlans() {
               </View>
             )}
 
+            {/* FIXED BUNDLE: every dish below, pickers disabled, one order button */}
+            {isFixedBundle && (
+              <>
+                {fixedVeg.length > 0 && (
+                  <View style={[styles.section, { width: contentWidth }]}>
+                    <View style={styles.groupHead}>
+                      <View style={[styles.vegMark, { borderColor: VEG }]}><View style={[styles.vegDot, { backgroundColor: VEG }]} /></View>
+                      <Text style={styles.groupHeadText}>Vegetarian</Text>
+                      <Text style={styles.groupHeadCount}>{fixedVeg.length} dishes</Text>
+                    </View>
+                    <View style={{ gap: spacing.md }}>{fixedVeg.map(it => <FixedDishRow key={it.item_id} it={it} />)}</View>
+                  </View>
+                )}
+                {fixedNonVeg.length > 0 && (
+                  <View style={[styles.section, { width: contentWidth }]}>
+                    <View style={styles.groupHead}>
+                      <View style={[styles.vegMark, { borderColor: NONVEG }]}><View style={[styles.vegDot, { backgroundColor: NONVEG }]} /></View>
+                      <Text style={styles.groupHeadText}>Non-Vegetarian</Text>
+                      <Text style={styles.groupHeadCount}>{fixedNonVeg.length} dishes</Text>
+                    </View>
+                    <View style={{ gap: spacing.md }}>{fixedNonVeg.map(it => <FixedDishRow key={it.item_id} it={it} />)}</View>
+                  </View>
+                )}
+              </>
+            )}
+
             {/* BOTTOM CTA */}
             <View style={[styles.section, { width: contentWidth, alignItems: "center" }]}>
-              <TouchableOpacity testID="mp-bottom-build" style={styles.ctaPrimaryDark} onPress={build}>
-                <Text style={styles.ctaPrimaryText}>Build your plan</Text>
+              <TouchableOpacity testID="mp-bottom-build" style={styles.ctaPrimaryDark} onPress={primaryAction}>
+                <Text style={styles.ctaPrimaryText}>{isFixedBundle ? `Order this week's plan · ${centsToCAD(pkg.price_cents)}` : primaryLabel}</Text>
                 <Ionicons name="arrow-forward" size={18} color="#fff" />
               </TouchableOpacity>
             </View>
@@ -300,6 +388,15 @@ const styles = StyleSheet.create({
   dishName: { fontSize: 15, fontWeight: "800", color: INK, flex: 1 },
   dishDesc: { fontSize: 12.5, color: MUTE, lineHeight: 18, minHeight: 36 },
   dishPrice: { fontSize: 13, fontWeight: "700", color: BLUE, marginTop: 2 },
+
+  fixedRow: { flexDirection: "row", gap: spacing.md, alignItems: "center", backgroundColor: "#fff", borderRadius: radius.lg, borderWidth: 1, borderColor: "#F0E6D8", padding: spacing.md, ...shadows.soft },
+  fixedImgWrap: { width: 96, height: 96, borderRadius: radius.md, overflow: "hidden", backgroundColor: CREAM },
+  fixedImg: { width: "100%", height: "100%" },
+  fixedIncluded: { fontSize: 12, fontWeight: "700", color: VEG, marginTop: 2 },
+  fixedStepper: { flexDirection: "row", alignItems: "center", gap: 10 },
+  fixedStepBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: CREAM, borderWidth: 1, borderColor: "#EBDFCE", alignItems: "center", justifyContent: "center" },
+  fixedStepText: { fontSize: 18, fontWeight: "800", color: MUTE },
+  fixedQty: { fontSize: 16, fontWeight: "900", color: INK },
 
   vegMark: { width: 16, height: 16, borderRadius: 3, borderWidth: 1.5, alignItems: "center", justifyContent: "center" },
   vegDot: { width: 7, height: 7, borderRadius: 4 },

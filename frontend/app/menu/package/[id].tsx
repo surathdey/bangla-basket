@@ -68,6 +68,21 @@ export default function PackageCustomize() {
 
   const isComposition = pkg?.pricing_mode === "composition";
 
+  // Fixed bundle: flat price, pick_count == every eligible dish, max 1 each —
+  // the bundle IS all dishes, so there is nothing to pick. All dishes are
+  // pre-included, steppers stay disabled, and one tap orders the plan.
+  // Any other shape falls back to normal picking.
+  const maxPerEarly = pkg?.max_per_dish || 0;
+  const isFixedBundle = !isComposition && (pkg?.pick_count || 0) > 0
+    && eligibleItems.length === (pkg?.pick_count || 0) && maxPerEarly === 1;
+  useEffect(() => {
+    if (isFixedBundle && eligibleItems.length > 0) {
+      const all: Record<string, number> = {};
+      eligibleItems.forEach(it => { all[it.item_id] = 1; });
+      setQty(all);
+    }
+  }, [isFixedBundle, eligibleItems]);
+
   // Count non-veg portions among picks (egg counts as non-veg).
   const vegTypeOf = (mid: string) => wm?.items.find(x => x.item_id === mid)?.veg_type || "vegetarian";
   const nonVegPicked = useMemo(() => {
@@ -255,7 +270,7 @@ export default function PackageCustomize() {
         <View style={styles.qtyBox}>
           <TouchableOpacity
             testID={`pkg-dec-${it.item_id}`}
-            disabled={!on}
+            disabled={isFixedBundle || !on}
             onPress={() => dec(it.item_id)}
             style={[styles.qtyBtn, !on && styles.qtyBtnDisabled]}
           >
@@ -264,7 +279,7 @@ export default function PackageCustomize() {
           <Text style={[styles.qtyText, on && styles.qtyTextActive]}>{n}</Text>
           <TouchableOpacity
             testID={`pkg-inc-${it.item_id}`}
-            disabled={!canInc}
+            disabled={isFixedBundle || !canInc}
             onPress={() => inc(it.item_id)}
             style={[styles.qtyBtn, canInc ? styles.qtyBtnAdd : styles.qtyBtnDisabled]}
           >
@@ -315,7 +330,7 @@ export default function PackageCustomize() {
           ) : (
             <View style={styles.summaryRow}>
               <Text style={styles.packPrice}>{centsToCAD(pkg.price_cents)}</Text>
-              <Text style={styles.packMeta}>total · pick {pickCount} portions · repeats allowed</Text>
+              <Text style={styles.packMeta}>{isFixedBundle ? `total · all ${pickCount} dishes included` : `total · pick ${pickCount} portions · repeats allowed`}</Text>
             </View>
           )}
         </View>
@@ -323,10 +338,12 @@ export default function PackageCustomize() {
         <View style={styles.stickyProgress}>
           <View style={{ flex: 1 }}>
             <Text style={styles.progressTitle}>
-              {isValid ? "All set!" : isComposition ? "Build your plan" : remaining === 1 ? "Pick 1 more" : `Pick ${remaining} more`}
+              {isFixedBundle ? "This week's plan" : isValid ? "All set!" : isComposition ? "Build your plan" : remaining === 1 ? "Pick 1 more" : `Pick ${remaining} more`}
             </Text>
             <Text style={styles.progressSub}>
-              {isComposition
+              {isFixedBundle
+                ? "All dishes included · no picking needed"
+                : isComposition
                 ? `${vegPicked} veg · ${nonVegPicked} non-veg`
                 : `${totalPicked} / ${pickCount} selected`}
             </Text>
@@ -422,7 +439,7 @@ export default function PackageCustomize() {
           onPress={onAdd}
         >
           <Ionicons name="bag-add" size={18} color="#fff" />
-          <Text style={styles.addBtnText}>Add to Bag</Text>
+          <Text style={styles.addBtnText}>{isFixedBundle ? "Order this week's plan" : "Add to Bag"}</Text>
         </TouchableOpacity>
       </View>
     </View>
