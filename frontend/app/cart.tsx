@@ -733,7 +733,7 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
                   <View style={styles.summaryBox}>
                     <SumRow label="Subtotal" value={centsToCAD(quote.subtotal_cents)} />
                     <SumRow
-                      label={`Delivery fee${quote.delivery_fee_tier && quote.delivery_fee_tier !== "standard" ? ` (${quote.delivery_fee_tier})` : ""}`}
+                      label="Delivery fee"
                       value={quote.delivery_fee_cents === 0 ? "FREE" : centsToCAD(quote.delivery_fee_cents)}
                       color={quote.delivery_fee_cents === 0 ? colors.success : undefined}
                     />
