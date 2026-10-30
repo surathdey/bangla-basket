@@ -10,6 +10,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 from pgdb import PgDatabase
 import stripe
+import html as _html
 import os
 import asyncio
 import logging
@@ -647,6 +648,7 @@ class OrderItemIn(BaseModel):
     ref_id: str  # item_id | package_id | weekly_menu_id
     quantity: int
     variant_id: Optional[str] = None  # for grocery variants
+    cut_preference: Optional[str] = None  # grocery cut style (Cut / By Weight items only)
     catering_guest_count: Optional[int] = None  # for catering only
     catering_selections: Optional[CateringSelection] = None
     package_selections: Optional[List[str]] = None  # weekly_package master_ids picked
@@ -2293,10 +2295,16 @@ async def _resolve_items(items: List[OrderItemIn], grocery_surcharge_cents: int 
                 name = g.get("title")
             if not available:
                 raise HTTPException(400, f"'{name}' is out of stock")
+            # Cut preference is honoured only on Cut / By Weight items; a value
+            # arriving for any other subcategory (e.g. Block) is dropped.
+            cut = (it.cut_preference or "").strip()[:80]
+            if g.get("subcategory") not in ("Cut", "By Weight"):
+                cut = ""
             line = {
                 "kind": "grocery",
                 "ref_id": it.ref_id,
                 "variant_id": it.variant_id or (chosen.get("variant_id") if chosen else ""),
+                "cut_preference": cut or None,
                 "name": name,
                 "unit_price_cents": unit_price,
                 "quantity": it.quantity,
@@ -6195,6 +6203,8 @@ async def _notify_owner_delivered(order: dict):
 def _item_selection_suffix(it: dict) -> str:
     """Human bracket listing the actual dishes chosen for a weekly plan / catering
     line, e.g. ' (Chicken Biryani × 2, Paneer Butter Masala)'."""
+    if it.get("kind") == "grocery" and it.get("cut_preference"):
+        return f" (Cut: {it['cut_preference']})"
     if it.get("kind") == "weekly_package":
         names = it.get("package_selection_names") or []
         if names:
@@ -6291,6 +6301,7 @@ async def _notify_order_created(order: dict, settings: dict, user_doc: dict):
     # ---- Owner email + SMS (notify fields accept comma-separated multiples) ----
     owner_emails = _notify_list(settings.get("notify_email")) or ([ADMIN_EMAIL] if ADMIN_EMAIL else [])
     owner_phones = _notify_list(settings.get("notify_phone"))
+    notes = (order.get("special_instructions") or "").strip()
     try:
         if _email.is_configured():
             html = (
@@ -6299,7 +6310,8 @@ async def _notify_order_created(order: dict, settings: dict, user_doc: dict):
                 f"<pre style='font-family:inherit'>{items_txt}</pre>"
                 f"<p><b>Total CA${total:.2f}</b> · {order.get('payment_method','').upper()}</p>"
                 f"<p>Deliver to: {(order.get('address') or {}).get('line1','')}, {(order.get('address') or {}).get('city','')}</p>"
-                f"<p><a href='{invoice_url}'>Invoice</a></p>"
+                + (f"<p><b>Customer notes:</b> {_html.escape(notes)}</p>" if notes else "")
+                + f"<p><a href='{invoice_url}'>Invoice</a></p>"
             )
             for to_email in owner_emails:
                 try:
@@ -6318,6 +6330,7 @@ async def _notify_order_created(order: dict, settings: dict, user_doc: dict):
                 f"Total CA${total:.2f} ({order.get('payment_method','').upper()})\n"
                 f"Deliver: {addr.get('line1','')}, {addr.get('city','')}\n"
                 f"Slot: {slot.get('date','')} {slot.get('window','').replace('_',' ')}"
+                + (f"\nNotes: {notes}" if notes else "")
             )
             for to_phone in owner_phones:
                 try:

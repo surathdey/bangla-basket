@@ -39,6 +39,7 @@ export type CartItem = {
   // Grocery variant fields
   variant_id?: string;                  // selected grocery variant id
   variant_title?: string;               // human-readable variant label
+  cut_preference?: string;              // fish cut style (Cut / By Weight items only)
   // Thali (party order) fields
   thali_type?: "veg" | "non_veg";
   thali_guest_count?: number;
@@ -103,7 +104,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         }
       }
       if (i.kind === "grocery") {
-        const existing = prev.find(p => p.kind === "grocery" && p.ref_id === i.ref_id && (p.variant_id || "") === (i.variant_id || ""));
+        // Same fish with a different cut preference stays a separate line.
+        const existing = prev.find(p => p.kind === "grocery" && p.ref_id === i.ref_id && (p.variant_id || "") === (i.variant_id || "") && (p.cut_preference || "") === (i.cut_preference || ""));
         if (existing) {
           return prev.map(p =>
             p.cart_item_id === existing.cart_item_id ? { ...p, quantity: p.quantity + qty } : p

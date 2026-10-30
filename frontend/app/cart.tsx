@@ -265,6 +265,7 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
       items: items.map(i => ({
         kind: i.kind, ref_id: i.ref_id, quantity: i.quantity,
         variant_id: i.variant_id,
+        cut_preference: i.cut_preference,
         catering_guest_count: i.catering_guest_count,
         catering_selections: i.catering_selections,
         package_selections: i.package_selections,
@@ -298,6 +299,7 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
         items: items.map(i => ({
           kind: i.kind, ref_id: i.ref_id, quantity: i.quantity,
           variant_id: i.variant_id,
+          cut_preference: i.cut_preference,
           catering_guest_count: i.catering_guest_count,
           catering_selections: i.catering_selections,
           package_selections: i.package_selections,
@@ -490,6 +492,9 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
                       )}
                       <View style={{ flex: 1 }}>
                         <Text style={styles.itemName} numberOfLines={2}>{i.name}</Text>
+                        {!!i.cut_preference && (
+                          <Text style={styles.itemMeta}>Cut: {i.cut_preference}</Text>
+                        )}
                         {isCatering ? (
                           <>
                             <Text style={styles.itemMeta}>

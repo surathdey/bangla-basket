@@ -19,7 +19,7 @@ import { LocationBanner } from "@/src/components/LocationBanner";
 import { FishSubcatNote } from "@/src/components/FishSubcatNote";
 
 export type Grocery = {
-  item_id: string; title: string; description: string; category: string;
+  item_id: string; title: string; description: string; category: string; subcategory?: string;
   price_cents: number; compare_at_cents: number; unit: string;
   image_url: string; images: string[]; in_stock: boolean; is_featured: boolean;
   has_variants: boolean;
@@ -88,7 +88,7 @@ export default function GroceriesTab() {
     add({
       kind: "grocery" as any, ref_id: g.item_id, name: g.title,
       price_cents: g.price_cents, image_url: g.image_url,
-      category: g.category, subcategory: (g as any).subcategory,
+      category: g.category, subcategory: g.subcategory,
     });
   };
 

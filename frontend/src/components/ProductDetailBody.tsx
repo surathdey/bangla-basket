@@ -15,6 +15,11 @@ import type { Grocery } from "../../app/(tabs)/groceries";
 
 type Variant = Grocery["variants"][number];
 
+// Fish cut styles offered on Cut / By Weight items (Block items are
+// pre-cut, so they get no selector). Sample photos per option arrive
+// from the owners later; the selector ships text-only until then.
+const CUT_OPTIONS = ["Gada-Peti", "Restaurant Cut", "Chinese Cut", "Gada-Peti 4 Slice"];
+
 /**
  * Shared product-detail renderer used by BOTH the mobile app route
  * (`/grocery/[id]`) and the desktop web route (`/shop/product/[id]`).
@@ -40,6 +45,8 @@ export function ProductDetailBody({
   const [qty, setQty] = useState(1);
   const [added, setAdded] = useState(false);
   const [variantId, setVariantId] = useState<string | null>(null);
+  const [cut, setCut] = useState<string | null>(null);
+  const [cutOpen, setCutOpen] = useState(false);
   const { add } = useCart();
   const router = useRouter();
   const { width } = useWindowDimensions();
@@ -57,6 +64,8 @@ export function ProductDetailBody({
       if (r.ok) {
         setItem(r.data);
         setQty(1);
+        setCut(null);
+        setCutOpen(false);
         onLoaded?.(r.data);
         if (r.data.has_variants && r.data.variants?.length) {
           const first = r.data.variants.find(v => v.available) || r.data.variants[0];
@@ -80,6 +89,7 @@ export function ProductDetailBody({
   const unitPrice = selected ? selected.price_cents : item.price_cents;
   const comparePrice = selected ? selected.compare_at_cents : item.compare_at_cents;
   const available = selected ? selected.available : item.in_stock;
+  const showCut = item.subcategory === "Cut" || item.subcategory === "By Weight";
 
   const onAdd = () => {
     if (item.has_variants && !selected) return;
@@ -91,8 +101,9 @@ export function ProductDetailBody({
       image_url: item.image_url,
       variant_id: selected?.variant_id,
       variant_title: selected?.title,
+      cut_preference: showCut ? (cut || undefined) : undefined,
       category: item.category,
-      subcategory: (item as any).subcategory,
+      subcategory: item.subcategory,
     }, qty);
     setAdded(true);
     setTimeout(() => setAdded(false), 1600);
@@ -145,6 +156,40 @@ export function ProductDetailBody({
               );
             })}
           </View>
+        </View>
+      )}
+
+      {showCut && (
+        <View style={styles.cutBox} testID="cut-preference-dropdown">
+          <Text style={styles.variantLabel}>Cut Preference</Text>
+          <TouchableOpacity
+            testID="cut-preference-field"
+            onPress={() => setCutOpen(o => !o)}
+            style={[styles.cutField, cutOpen && styles.cutFieldOpen]}
+          >
+            <Text style={[styles.cutFieldText, !cut && { color: colors.textMuted }]}>
+              {cut || "Choose how you want it cut"}
+            </Text>
+            <Ionicons name={cutOpen ? "chevron-up" : "chevron-down"} size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+          {cutOpen && (
+            <View style={styles.cutList}>
+              {CUT_OPTIONS.map((opt) => {
+                const on = cut === opt;
+                return (
+                  <TouchableOpacity
+                    key={opt}
+                    testID={`cut-option-${opt.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase()}`}
+                    onPress={() => { setCut(opt); setCutOpen(false); }}
+                    style={[styles.cutOption, on && styles.cutOptionOn]}
+                  >
+                    <Text style={[styles.cutOptionText, on && { color: colors.primary }]}>{opt}</Text>
+                    {on && <Ionicons name="checkmark-circle" size={18} color={colors.primary} />}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
         </View>
       )}
 
@@ -288,6 +333,15 @@ const styles = StyleSheet.create({
   variantTitle: { fontSize: 14, fontWeight: "700", color: colors.text },
   variantOos: { fontSize: 11, color: colors.danger, fontWeight: "700", marginTop: 2 },
   variantPrice: { fontSize: 15, fontWeight: "800", color: colors.text },
+
+  cutBox: { marginTop: spacing.lg, gap: spacing.sm },
+  cutField: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1.5, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: 13, backgroundColor: colors.surface },
+  cutFieldOpen: { borderColor: colors.primary },
+  cutFieldText: { fontSize: 14, fontWeight: "700", color: colors.text },
+  cutList: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, overflow: "hidden", backgroundColor: colors.surface },
+  cutOption: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.md, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border },
+  cutOptionOn: { backgroundColor: colors.surfaceAlt },
+  cutOptionText: { fontSize: 14, fontWeight: "700", color: colors.text },
 
   desc: { color: colors.textMuted, fontSize: 14, lineHeight: 21, marginTop: 14 },
   footer: { backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border, padding: spacing.lg, paddingTop: spacing.md },
