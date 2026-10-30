@@ -2563,6 +2563,7 @@ async def cancel_unpaid_order(order_id: str, user: User = Depends(_current_user)
 class CheckoutReq(BaseModel):
     order_id: str
     origin_url: str  # frontend origin to build success/cancel URLs
+    return_base: Optional[str] = None  # optional same-origin base for Stripe return URLs (web shop)
 
 
 @api.post("/checkout/session")
@@ -2581,8 +2582,14 @@ async def create_checkout_session(req: CheckoutReq, user: User = Depends(_curren
         raise HTTPException(400, "Invalid order total")
     stripe_sdk = _stripe()
     # Stripe replaces {CHECKOUT_SESSION_ID} with the real id on redirect.
-    success_url = f"{req.origin_url}/order/{req.order_id}?paid=1&session_id={{CHECKOUT_SESSION_ID}}"
-    cancel_url = f"{req.origin_url}/order/{req.order_id}?paid=0"
+    # Web shop checkout passes return_base = origin + "/shop" so Stripe
+    # returns to /shop/order/{id}. Only accept same-origin bases (never an
+    # arbitrary redirect target); otherwise fall back to origin_url.
+    base = req.origin_url
+    if req.return_base and req.return_base.startswith(req.origin_url):
+        base = req.return_base
+    success_url = f"{base}/order/{req.order_id}?paid=1&session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{base}/order/{req.order_id}?paid=0"
     try:
         session = await run_in_threadpool(
             stripe_sdk.checkout.Session.create,
