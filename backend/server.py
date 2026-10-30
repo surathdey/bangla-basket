@@ -1857,16 +1857,25 @@ def _norm_city(s) -> str:
     return " ".join((s or "").split()).lower()
 
 
-async def _zone_fee_for_city(city: Optional[str]) -> dict:
-    """Flat delivery fee for a city from enabled pricing zones with fee_cents set.
-    City match is exact on the normalized city name. Returns fee_cents None
-    when no fee zone matches (caller falls back to km tiers)."""
-    c = _norm_city(city)
-    if not c:
+def _valid_ca_postal(s) -> bool:
+    """True for a well-formed Canadian postal code (6 chars, no space).
+    First letter excludes D, F, I, O, Q, U, W, Z; third/fifth exclude D, F, I, O, Q, U."""
+    p = _normalize_postal(s)
+    return re.fullmatch(r"[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTV-Z]\d[ABCEGHJ-NPRSTV-Z]\d", p) is not None
+
+
+async def _zone_fee_for_postal(postal: Optional[str]) -> dict:
+    """Flat delivery fee for a postal code from enabled pricing zones with fee_cents set.
+    Match is on the FSA (first 3 chars of the normalized postal code) against the
+    zone's postal_prefixes. Returns fee_cents None when no fee zone matches
+    (caller falls back to km tiers). City names play no part in the decision."""
+    p = _normalize_postal(postal)
+    if not _valid_ca_postal(p):
         return {"zone_id": None, "zone_name": None, "fee_cents": None}
+    fsa = p[:3]
     async for z in db.pricing_zones.find({"enabled": {"$ne": False}}):
-        cities = [_norm_city(x) for x in (z.get("cities") or [])]
-        if c in cities and z.get("fee_cents") is not None:
+        prefs = [_normalize_postal(x) for x in (z.get("postal_prefixes") or [])]
+        if fsa in prefs and z.get("fee_cents") is not None:
             return {"zone_id": z.get("zone_id"), "zone_name": z.get("name"),
                     "fee_cents": int(z["fee_cents"])}
     return {"zone_id": None, "zone_name": None, "fee_cents": None}
@@ -1878,16 +1887,17 @@ _ZONE_CITY_ALIASES = {"st catherine", "branford", "new market", "kwgc", "niagara
 
 async def _delivery_area() -> tuple:
     """(has_zones, display_cities, normalized_set) from enabled pricing zones
-    that carry a city list. has_zones False → the zone system is not in use
-    (legacy km-tier behaviour, no rejection)."""
+    that carry postal prefixes. has_zones False → the zone system is not in use
+    (legacy km-tier behaviour, no rejection). City names are display-only here
+    (rejection message); the decision itself is postal-code based."""
     display: set = set()
     norm: set = set()
     has = False
     async for z in db.pricing_zones.find({"enabled": {"$ne": False}}):
-        cities = [c.strip() for c in (z.get("cities") or []) if c and c.strip()]
-        if not cities:
+        if not (z.get("postal_prefixes") or []):
             continue
         has = True
+        cities = [c.strip() for c in (z.get("cities") or []) if c and c.strip()]
         for c in cities:
             norm.add(_norm_city(c))
             if _norm_city(c) not in _ZONE_CITY_ALIASES:
@@ -1895,14 +1905,22 @@ async def _delivery_area() -> tuple:
     return has, sorted(display), norm
 
 
-async def _out_of_zone_error(city: Optional[str]) -> Optional[str]:
-    """Rejection message when a delivery city falls outside the delivery
-    area, else None. Only enforced when delivery zones are configured."""
-    has, display, norm = await _delivery_area()
+async def _out_of_zone_error_postal(postal: Optional[str]) -> Optional[str]:
+    """Rejection message when a delivery postal code's FSA falls outside the
+    delivery area, else None. Only enforced when delivery zones are configured.
+    Blank/invalid postal returns None (address form still open); order create
+    enforces a valid postal code separately."""
+    has, display, _ = await _delivery_area()
     if not has:
         return None
-    if _norm_city(city) in norm:
+    p = _normalize_postal(postal)
+    if not _valid_ca_postal(p):
         return None
+    fsa = p[:3]
+    async for z in db.pricing_zones.find({"enabled": {"$ne": False}}):
+        prefs = [_normalize_postal(x) for x in (z.get("postal_prefixes") or [])]
+        if fsa in prefs:
+            return None
     cities = ", ".join(display)
     return (f"Sorry — we deliver only in the following areas: {cities}. "
             "We don't deliver anywhere else yet.")
@@ -1910,11 +1928,11 @@ async def _out_of_zone_error(city: Optional[str]) -> Optional[str]:
 
 async def compute_delivery_fee(address, settings):
     """Returns (fee_cents, distance_km_or_None, tier_label). A fee zone matching
-    the delivery city wins over km tiers; otherwise the km-tier table from
+    the delivery postal code's FSA wins over km tiers; otherwise the km-tier table from
     BusinessSettings applies. Origin + tiers are read from BusinessSettings
     so the admin can configure them in Settings."""
     origin = (settings.get("kitchen_address") or "").strip() or MILTON_ORIGIN
-    zone = await _zone_fee_for_city(getattr(address, "city", None))
+    zone = await _zone_fee_for_postal(getattr(address, "postal_code", None))
     if zone["fee_cents"] is not None:
         return zone["fee_cents"], None, f"zone:{zone['zone_name']}"
     km = await _driving_distance_km(address, origin)
@@ -2460,18 +2478,18 @@ async def _clawback_points_if_cancelled(order: dict, new_status: str):
 async def order_quote(req: QuoteOrderReq, user: User = Depends(_current_user)):
     # When a zone flat fee applies, the zone surcharge is skipped (else the
     # customer would pay zone fee + zone surcharge on the same order).
-    zone_fee = await _zone_fee_for_city(getattr(req.address, "city", None)) if req.address else {"fee_cents": None}
+    zone_fee = await _zone_fee_for_postal(getattr(req.address, "postal_code", None)) if req.address else {"fee_cents": None}
     g_sc = 0 if zone_fee["fee_cents"] is not None else (await _zone_surcharge_for(getattr(req.address, "postal_code", None)))["surcharge_cents"] if req.address else 0
     snaps, subtotal = await _resolve_items(req.items, g_sc)
     settings = await _get_settings()
     earn_rate, redeem_rate = _loyalty_cfg(settings)
     discount, coupon, coupon_err = await _resolve_coupon(req.coupon_code, subtotal, user, snaps)
     ref_discount, _, ref_err = await _resolve_referral(req.referral_code, user, snaps)
-    # Out-of-zone notice: only once the customer has typed a city (blank city
-    # means the address form is still open, not a rejection).
+    # Out-of-zone notice: only once the customer has typed a valid postal code
+    # (blank/invalid postal means the address form is still open, not a rejection).
     delivery_error = None
-    if req.address and (req.address.city or "").strip():
-        delivery_error = await _out_of_zone_error(req.address.city)
+    if req.address and (req.address.postal_code or "").strip():
+        delivery_error = await _out_of_zone_error_postal(req.address.postal_code)
     is_customer = user.role != "guest"
     pts_balance = user.loyalty_points if is_customer else 0
     # redeem_points are POINTS; discount value in cents = points*100 // redeem_rate
@@ -2569,12 +2587,14 @@ async def create_order(req: CreateOrderReq, request: Request, user: User = Depen
                 "has not completed their platform subscription payment. Please try again shortly."
             )
         )
-    zone_fee = await _zone_fee_for_city(getattr(req.address, "city", None)) if getattr(req, "address", None) else {"fee_cents": None}
+    zone_fee = await _zone_fee_for_postal(getattr(req.address, "postal_code", None)) if getattr(req, "address", None) else {"fee_cents": None}
     g_sc = 0 if zone_fee["fee_cents"] is not None else (await _zone_surcharge_for(getattr(req.address, "postal_code", None)))["surcharge_cents"] if getattr(req, "address", None) else 0
     snaps, subtotal = await _resolve_items(req.items, g_sc)
     settings = await _get_settings()
     _validate_delivery_slot(req.slot, settings)
-    zone_err = await _out_of_zone_error(getattr(req.address, "city", None))
+    if not _valid_ca_postal(getattr(req.address, "postal_code", None)):
+        raise HTTPException(400, "Please enter a valid Canadian postal code for delivery.")
+    zone_err = await _out_of_zone_error_postal(getattr(req.address, "postal_code", None))
     if zone_err:
         raise HTTPException(400, zone_err)
     earn_rate, redeem_rate = _loyalty_cfg(settings)
