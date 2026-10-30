@@ -100,6 +100,9 @@ async def migrate(mongo_uri, mongo_db, pg_dsn, collections, truncate,
             batch = []
             mongo_docs = []
             async with pool.acquire() as conn:
+                before = await conn.fetchval(
+                    f'SELECT COUNT(*) FROM "{table}"')
+            async with pool.acquire() as conn:
                 async with conn.transaction():
                     for doc in cursor:
                         norm = _normalize(doc)
@@ -107,22 +110,27 @@ async def migrate(mongo_uri, mongo_db, pg_dsn, collections, truncate,
                                       json.dumps(norm, ensure_ascii=False)))
                         mongo_docs.append(norm)
                         if len(batch) >= 500:
-                            status = await conn.executemany(
+                            # NOTE: asyncpg executemany() returns None
+                            # (no command status), so inserted rows are
+                            # derived from before/after counts below.
+                            await conn.executemany(
                                 f'INSERT INTO "{table}" ({col_list}, doc) '
                                 f"VALUES ({placeholders}, "
                                 f"${len(cols) + 1}::jsonb) "
                                 f"ON CONFLICT DO NOTHING",
                                 batch)
-                            inserted += int(status.split()[-1])
                             batch = []
                     if batch:
-                        status = await conn.executemany(
+                        await conn.executemany(
                             f'INSERT INTO "{table}" ({col_list}, doc) '
                             f"VALUES ({placeholders}, "
                             f"${len(cols) + 1}::jsonb) "
                             f"ON CONFLICT DO NOTHING",
                             batch)
-                        inserted += int(status.split()[-1])
+            async with pool.acquire() as conn:
+                after = await conn.fetchval(
+                    f'SELECT COUNT(*) FROM "{table}"')
+            inserted = after - before
             skipped = len(mongo_docs) - inserted
             print(f"{table}: mongo={len(mongo_docs)} "
                   f"inserted={inserted} skipped(existing)={skipped}")
