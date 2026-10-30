@@ -274,6 +274,8 @@ class User(BaseModel):
     phone: Optional[str] = None
     default_address: Optional[dict] = None
     loyalty_points: int = 0
+    referral_code: str = ""          # e.g. "BB4F2K9A" — auto-assigned on login
+    weekly_meal_streak: int = 0      # completed weekly-meal orders since last reward
     email_verified: bool = False
     has_logged_in: bool = False          # flips true on first successful login (first-time coupon trigger)
     first_login_at: Optional[datetime] = None
@@ -427,6 +429,16 @@ class BusinessSettings(BaseModel):
         {"max_km": 75, "fee_cents": 1000},
     ]
     delivery_fee_over_max_cents: int = 1500
+    # ---- Zone-based delivery (Bangla Basket delivery plan, Oct 2026) ----
+    # When delivery_cycles is set, delivery slots come from these cycles
+    # (delivery_day / cutoff_day use 0=Sun..6=Sat JS convention; cutoff_hour
+    # is Toronto local time). Empty = legacy delivery_days fallback.
+    delivery_cycles: List[dict] = []
+    # Free delivery: subtotal at/above threshold → delivery fee waived.
+    # Remote cities (Barrie, London) use the higher threshold.
+    free_delivery_threshold_cents: int = 15000
+    free_delivery_remote_threshold_cents: int = 25000
+    free_delivery_remote_cities: List[str] = ["Barrie", "London"]
     # Restaurant owner notification targets. Every new order + every delivery
     # sends a copy here (email always; SMS if a phone + Twilio are set).
     notify_email: str = ""
@@ -478,7 +490,7 @@ class BusinessSettings(BaseModel):
     # ---- First-time coupon (Admin → Settings → Coupons) ----
     # When enabled, a unique percentage coupon is auto-issued on a customer's first login.
     first_time_coupon_enabled: bool = True
-    first_time_coupon_percent: int = 15
+    first_time_coupon_percent: int = 20
     # Per-payment-method configuration
     # Per-payment-method configuration. Stripe (card + Apple/Google Pay via
     # hosted Checkout) is enabled alongside COD + Interac.
@@ -573,6 +585,7 @@ class GroceryVariant(BaseModel):
     available: bool = True
     sku: str = ""
     weight_g: int = 0
+    image_url: str = ""              # cut sample photo shown in the option selector
 
 
 class GroceryItem(BaseModel):
@@ -614,6 +627,7 @@ class Coupon(BaseModel):
     usage_limit: int = 0                    # total redemptions allowed across all customers; 0 = unlimited
     per_customer_limit: int = 0             # redemptions allowed per customer; 0 = unlimited
     first_time_only: bool = False           # only redeemable by customers who've never ordered
+    applies_to: str = "all"                 # all | grocery_only | weekly_meal_only | all_except_weekly_meal
     used_count: int = 0                     # total redemptions so far
     owner_user_id: Optional[str] = None     # set for auto-issued personal (first-time) coupons
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -670,6 +684,7 @@ class QuoteOrderReq(BaseModel):
     slot: DeliverySlot
     phone: Optional[str] = ""
     coupon_code: Optional[str] = None
+    referral_code: Optional[str] = None
     redeem_points: int = 0
     special_instructions: Optional[str] = ""
     payment_method: str = "card"
@@ -681,6 +696,7 @@ class CreateOrderReq(BaseModel):
     slot: DeliverySlot
     phone: str  # REQUIRED — contact phone captured at checkout
     coupon_code: Optional[str] = None
+    referral_code: Optional[str] = None
     redeem_points: int = 0  # points to redeem (1 pt = 1 cent)
     special_instructions: Optional[str] = ""
     payment_method: str = "card"  # "card" (Stripe) | "cod" (Cash on Delivery)
@@ -701,10 +717,13 @@ class Order(BaseModel):
     tax_cents: int = 0
     tax_label: str = "HST"
     discount_cents: int
+    referral_discount_cents: int = 0
     points_redeemed_cents: int
     points_redeemed: int = 0   # actual loyalty points consumed (balance deducted by this)
     total_cents: int
     coupon_code: Optional[str] = None
+    referral_code: Optional[str] = None
+    referrer_user_id: Optional[str] = None
     special_instructions: Optional[str] = ""
     payment_method: str = "card"  # "card" | "cod"
     status: str = "pending_payment"
@@ -923,6 +942,37 @@ async def _new_session_token(user_id: str, prefix: str = "sess", days: int = 30)
     return token
 
 
+async def _ensure_referral_code(user_id: str) -> Optional[str]:
+    """Assign a referral code on first sight (idempotent). Format BB + 6 hex."""
+    u = await db.users.find_one({"user_id": user_id}, {"_id": 0, "referral_code": 1})
+    if not u:
+        return None
+    if (u.get("referral_code") or "").strip():
+        return u["referral_code"]
+    for _ in range(20):
+        code = "BB" + _secrets.token_hex(3).upper()
+        if not await db.users.find_one({"referral_code": code}, {"_id": 0}):
+            await db.users.update_one({"user_id": user_id}, {"$set": {"referral_code": code}})
+            return code
+    return None
+
+
+async def _resolve_referral(code: Optional[str], user, snapshots):
+    """Referral programme: 10% off GROCERY lines when a valid referrer code is
+    entered. Returns (discount_cents, referrer_user_id_or_None, error_or_None).
+    The referrer reward coupon is issued separately at order confirmation."""
+    if not code:
+        return 0, None, None
+    ref = await db.users.find_one({"referral_code": code.strip().upper()},
+                                  {"_id": 0, "user_id": 1, "role": 1})
+    if not ref or ref.get("role") == "guest":
+        return 0, None, "Invalid referral code."
+    if ref["user_id"] == getattr(user, "user_id", None):
+        return 0, None, "You can't use your own referral code."
+    base = sum(int(l.get("line_total_cents", 0) or 0) for l in (snapshots or []) if l.get("kind") == "grocery")
+    return base * 10 // 100, ref["user_id"], None
+
+
 async def _issue_first_time_coupon(user: dict) -> Optional[dict]:
     settings = await _get_settings()
     if not settings.get("first_time_coupon_enabled", True):
@@ -930,13 +980,14 @@ async def _issue_first_time_coupon(user: dict) -> Optional[dict]:
     existing = await db.coupons.find_one({"owner_user_id": user["user_id"]}, {"_id": 0})
     if existing:
         return existing
-    pct = int(settings.get("first_time_coupon_percent", 15))
+    pct = int(settings.get("first_time_coupon_percent", 20))
     code = f"WELCOME{_secrets.randbelow(9000) + 1000}"
     while await db.coupons.find_one({"code": code}):
         code = f"WELCOME{_secrets.randbelow(9000) + 1000}"
     doc = Coupon(code=code, discount_type="percent", value=pct, active=True,
                  description=f"{pct}% off your first order — welcome to {BRAND_NAME}!",
                  per_customer_limit=1, usage_limit=1, first_time_only=False,
+                 applies_to="all_except_weekly_meal",
                  owner_user_id=user["user_id"]).model_dump()
     await db.coupons.insert_one(doc)
     return doc
@@ -944,6 +995,10 @@ async def _issue_first_time_coupon(user: dict) -> Optional[dict]:
 
 async def _handle_first_login(user_id: str):
     """On a customer's first successful login: flag it + issue the first-time coupon."""
+    try:
+        await _ensure_referral_code(user_id)
+    except Exception as e:
+        log.warning(f"[referral] ensure code failed: {e}")
     u = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     if not u or u.get("role") == "guest" or u.get("has_logged_in"):
         return
@@ -1798,10 +1853,34 @@ async def _driving_distance_km(address, origin):
     return None
 
 
+def _norm_city(s) -> str:
+    return " ".join((s or "").split()).lower()
+
+
+async def _zone_fee_for_city(city: Optional[str]) -> dict:
+    """Flat delivery fee for a city from enabled pricing zones with fee_cents set.
+    City match is exact on the normalized city name. Returns fee_cents None
+    when no fee zone matches (caller falls back to km tiers)."""
+    c = _norm_city(city)
+    if not c:
+        return {"zone_id": None, "zone_name": None, "fee_cents": None}
+    async for z in db.pricing_zones.find({"enabled": {"$ne": False}}):
+        cities = [_norm_city(x) for x in (z.get("cities") or [])]
+        if c in cities and z.get("fee_cents") is not None:
+            return {"zone_id": z.get("zone_id"), "zone_name": z.get("name"),
+                    "fee_cents": int(z["fee_cents"])}
+    return {"zone_id": None, "zone_name": None, "fee_cents": None}
+
+
 async def compute_delivery_fee(address, settings):
-    """Returns (fee_cents, distance_km_or_None, tier_label). Origin + tiers are
-    read from BusinessSettings so the admin can configure them in Settings."""
+    """Returns (fee_cents, distance_km_or_None, tier_label). A fee zone matching
+    the delivery city wins over km tiers; otherwise the km-tier table from
+    BusinessSettings applies. Origin + tiers are read from BusinessSettings
+    so the admin can configure them in Settings."""
     origin = (settings.get("kitchen_address") or "").strip() or MILTON_ORIGIN
+    zone = await _zone_fee_for_city(getattr(address, "city", None))
+    if zone["fee_cents"] is not None:
+        return zone["fee_cents"], None, f"zone:{zone['zone_name']}"
     km = await _driving_distance_km(address, origin)
     if km is None:
         return settings.get("default_delivery_fee_cents", DELIVERY_FEE_CENTS), None, "standard"
@@ -1809,6 +1888,16 @@ async def compute_delivery_fee(address, settings):
     over = settings.get("delivery_fee_over_max_cents", DEFAULT_DELIVERY_FEE_OVER_MAX_CENTS)
     fee, tier = _fee_for_km(km, tiers, over)
     return fee, round(km, 1), tier
+
+
+def _free_delivery_applies(subtotal_cents: int, city: Optional[str], settings: dict) -> bool:
+    """Free-delivery threshold: standard threshold, or the higher remote
+    threshold for Barrie / London (and any cities the admin lists)."""
+    c = _norm_city(city)
+    remote = {_norm_city(x) for x in (settings.get("free_delivery_remote_cities") or ["Barrie", "London"])}
+    threshold = int(settings.get("free_delivery_remote_threshold_cents", 25000) if c in remote
+                    else settings.get("free_delivery_threshold_cents", 15000))
+    return subtotal_cents >= threshold
 
 
 
@@ -2045,6 +2134,13 @@ async def _resolve_items(items: List[OrderItemIn], grocery_surcharge_cents: int 
             else:
                 if len(picks) != pick_count:
                     raise HTTPException(400, f"Weekly package requires exactly {pick_count} portions (got {len(picks)})")
+                # Flat mode also honours max_per_dish (e.g. "all 6 items" = 1 of each).
+                from collections import Counter as _C0f
+                max_per_f = int(pkg.get("max_per_dish") or 0)
+                if max_per_f > 0:
+                    over_f = [names_map.get(mid, mid) for mid, c in _C0f(picks).items() if c > max_per_f]
+                    if over_f:
+                        raise HTTPException(400, f"You can pick at most {max_per_f} of the same dish (too many: {', '.join(over_f)}).")
                 composition = None
 
             # Human-readable display list — aggregate repeats as "Biryani × 3"
@@ -2194,8 +2290,10 @@ def _loyalty_cfg(settings: dict):
     return earn, max(1, redeem)
 
 
-async def _resolve_coupon(code: Optional[str], subtotal: int, user: User):
-    """Validate a coupon against all rules. Returns (discount_cents, coupon_code, error_or_None)."""
+async def _resolve_coupon(code: Optional[str], subtotal: int, user: User, snapshots=None):
+    """Validate a coupon against all rules. Returns (discount_cents, coupon_code, error_or_None).
+    The discount base depends on applies_to: grocery_only / weekly_meal_only /
+    all_except_weekly_meal restrict the base to the matching snapshot lines."""
     if not code:
         return 0, None, None
     c = await db.coupons.find_one({"code": code.strip().upper()}, {"_id": 0})
@@ -2225,10 +2323,20 @@ async def _resolve_coupon(code: Optional[str], subtotal: int, user: User):
             {"user_id": user.user_id, "payment_status": {"$in": ["paid", "cod_pending", "interac_pending"]}})
         if prior > 0:
             return 0, None, "This coupon is for first-time customers only."
-    if c.get("discount_type") == "percent":
-        discount = subtotal * int(c["value"]) // 100
+    applies = c.get("applies_to") or "all"
+    snaps = snapshots or []
+    if applies == "grocery_only":
+        base = sum(int(l.get("line_total_cents", 0) or 0) for l in snaps if l.get("kind") == "grocery")
+    elif applies == "weekly_meal_only":
+        base = sum(int(l.get("line_total_cents", 0) or 0) for l in snaps if l.get("kind") in ("menu", "weekly_package"))
+    elif applies == "all_except_weekly_meal":
+        base = subtotal - sum(int(l.get("line_total_cents", 0) or 0) for l in snaps if l.get("kind") in ("menu", "weekly_package"))
     else:
-        discount = min(int(c["value"]), subtotal)
+        base = subtotal
+    if c.get("discount_type") == "percent":
+        discount = base * int(c["value"]) // 100
+    else:
+        discount = min(int(c["value"]), base)
     return discount, c["code"], None
 
 
@@ -2248,8 +2356,39 @@ async def _record_loyalty_and_coupon(order: dict, user_id: str):
     if code:
         already = await db.coupon_redemptions.find_one({"code": code, "order_id": oid})
         if not already:
-            await db.coupon_redemptions.insert_one({"code": code, "user_id": user_id, "order_id": oid, "ts": now})
+            await db.coupon_redemptions.insert_one({ "code": code, "user_id": user_id, "order_id": oid, "ts": now})
             await db.coupons.update_one({"code": code}, {"$inc": {"used_count": 1}})
+    # Referral reward: on the referred customer's confirmed/paid order, the
+    # referrer earns a 10% grocery-only coupon — once per (referrer, referred) pair.
+    referrer_id = order.get("referrer_user_id")
+    if referrer_id and user_id != referrer_id:
+        already_ref = await db.referrals.find_one({"referrer_user_id": referrer_id, "referred_user_id": user_id})
+        if not already_ref:
+            await db.referrals.insert_one({"referrer_user_id": referrer_id, "referred_user_id": user_id,
+                                           "order_id": oid, "ts": now})
+            rcode = f"REF{_secrets.randbelow(9000) + 1000}"
+            while await db.coupons.find_one({"code": rcode}):
+                rcode = f"REF{_secrets.randbelow(9000) + 1000}"
+            await db.coupons.insert_one(Coupon(code=rcode, discount_type="percent", value=10, active=True,
+                description="10% off groceries — thanks for referring a friend!",
+                per_customer_limit=1, usage_limit=1, applies_to="grocery_only",
+                owner_user_id=referrer_id).model_dump())
+    # Weekly-meal streak: 4 completed weekly-meal orders → 50% off the 5th.
+    snaps = order.get("items_snapshot") or []
+    if any(l.get("kind") in ("menu", "weekly_package") for l in snaps):
+        u = await db.users.find_one({"user_id": user_id}, {"_id": 0, "weekly_meal_streak": 1})
+        if u is not None:
+            streak = int(u.get("weekly_meal_streak") or 0) + 1
+            if streak >= 4:
+                mcode = f"MEAL50{_secrets.randbelow(9000) + 1000}"
+                while await db.coupons.find_one({"code": mcode}):
+                    mcode = f"MEAL50{_secrets.randbelow(9000) + 1000}"
+                await db.coupons.insert_one(Coupon(code=mcode, discount_type="percent", value=50, active=True,
+                    description="50% off your 5th weekly meal — thanks for 4 in a row!",
+                    per_customer_limit=1, usage_limit=1, applies_to="weekly_meal_only",
+                    owner_user_id=user_id).model_dump())
+                streak = 0
+            await db.users.update_one({"user_id": user_id}, {"$set": {"weekly_meal_streak": streak}})
 
 
 async def _clawback_points_if_cancelled(order: dict, new_status: str):
@@ -2283,17 +2422,21 @@ async def _clawback_points_if_cancelled(order: dict, new_status: str):
 
 @api.post("/orders/quote")
 async def order_quote(req: QuoteOrderReq, user: User = Depends(_current_user)):
-    g_sc = (await _zone_surcharge_for(getattr(req.address, "postal_code", None)))["surcharge_cents"] if req.address else 0
+    # When a zone flat fee applies, the zone surcharge is skipped (else the
+    # customer would pay zone fee + zone surcharge on the same order).
+    zone_fee = await _zone_fee_for_city(getattr(req.address, "city", None)) if req.address else {"fee_cents": None}
+    g_sc = 0 if zone_fee["fee_cents"] is not None else (await _zone_surcharge_for(getattr(req.address, "postal_code", None)))["surcharge_cents"] if req.address else 0
     snaps, subtotal = await _resolve_items(req.items, g_sc)
     settings = await _get_settings()
     earn_rate, redeem_rate = _loyalty_cfg(settings)
-    discount, coupon, coupon_err = await _resolve_coupon(req.coupon_code, subtotal, user)
+    discount, coupon, coupon_err = await _resolve_coupon(req.coupon_code, subtotal, user, snaps)
+    ref_discount, _, ref_err = await _resolve_referral(req.referral_code, user, snaps)
     is_customer = user.role != "guest"
     pts_balance = user.loyalty_points if is_customer else 0
     # redeem_points are POINTS; discount value in cents = points*100 // redeem_rate
     max_redeem_cents = pts_balance * 100 // redeem_rate
     want_cents = max(0, req.redeem_points) * 100 // redeem_rate
-    points_redeem_cents = min(want_cents, max_redeem_cents, max(0, subtotal - discount))
+    points_redeem_cents = min(want_cents, max_redeem_cents, max(0, subtotal - discount - ref_discount))
     points_consumed = round(points_redeem_cents * redeem_rate / 100) if points_redeem_cents else 0
     # Tell the customer when their requested redemption was reduced (over-balance
     # or capped at the order value) instead of silently clamping it.
@@ -2305,7 +2448,9 @@ async def order_quote(req: QuoteOrderReq, user: User = Depends(_current_user)):
         else:
             points_notice = f"Points capped at order value — {points_consumed} applied."
     delivery_fee, dist_km, fee_tier = await compute_delivery_fee(req.address, settings)
-    taxable = max(0, subtotal + delivery_fee - discount - points_redeem_cents)
+    if _free_delivery_applies(subtotal, getattr(req.address, "city", None), settings):
+        delivery_fee, fee_tier = 0, "free_delivery"
+    taxable = max(0, subtotal + delivery_fee - discount - ref_discount - points_redeem_cents)
     tax_on = _tax_enabled_for_method(settings, req.payment_method)
     tax_cents = (taxable * settings.get("tax_rate_bps", 1300)) // 10000 if tax_on else 0
     total = taxable + tax_cents
@@ -2321,6 +2466,8 @@ async def order_quote(req: QuoteOrderReq, user: User = Depends(_current_user)):
         "tax_label": settings.get("tax_label", "HST"),
         "tax_enabled": tax_on,
         "discount_cents": discount,
+        "referral_discount_cents": ref_discount,
+        "referral_error": ref_err,
         "points_redeemed_cents": points_redeem_cents,
         "points_consumed": points_consumed,
         "points_notice": points_notice,
@@ -2334,6 +2481,35 @@ async def order_quote(req: QuoteOrderReq, user: User = Depends(_current_user)):
         "points_earn_preview": earn_preview,
         "is_guest": not is_customer,
     }
+
+
+def _validate_delivery_slot(slot, settings):
+    """Enforce configured delivery cycles: the slot date must fall on a cycle
+    delivery day and be booked before that cycle's cutoff (Toronto time).
+    No cycles configured → legacy behaviour (no validation)."""
+    cycles = settings.get("delivery_cycles") or []
+    if not cycles:
+        return
+    try:
+        d = date.fromisoformat(slot.date)
+    except Exception:
+        raise HTTPException(400, "Invalid delivery date.")
+    js_dow = (d.weekday() + 1) % 7  # Mon=1 .. Sun=0
+    cycle = next((c for c in cycles if int(c.get("delivery_day", -1)) == js_dow), None)
+    if not cycle:
+        names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+        days = sorted({int(c.get("delivery_day", 0)) for c in cycles})
+        raise HTTPException(400, "Please choose a " + " or ".join(names[x] for x in days) + " delivery slot.")
+    from zoneinfo import ZoneInfo as _ZoneInfo
+    cutoff_day = int(cycle.get("cutoff_day", 0))
+    cutoff_hour = int(cycle.get("cutoff_hour", 12))
+    days_back = (js_dow - cutoff_day) % 7
+    cutoff_date = d - timedelta(days=days_back)
+    cutoff = datetime(cutoff_date.year, cutoff_date.month, cutoff_date.day,
+                      cutoff_hour, tzinfo=_ZoneInfo("America/Toronto"))
+    now_toronto = datetime.now(timezone.utc).astimezone(_ZoneInfo("America/Toronto"))
+    if now_toronto > cutoff:
+        raise HTTPException(400, f"Cutoff passed for this delivery slot ({cycle.get('label') or 'delivery'}). Please choose the next available slot.")
 
 
 @api.post("/orders")
@@ -2351,23 +2527,28 @@ async def create_order(req: CreateOrderReq, request: Request, user: User = Depen
                 "has not completed their platform subscription payment. Please try again shortly."
             )
         )
-    snaps, subtotal = await _resolve_items(
-        req.items,
-        (await _zone_surcharge_for(getattr(req.address, "postal_code", None)))["surcharge_cents"] if getattr(req, "address", None) else 0,
-    )
+    zone_fee = await _zone_fee_for_city(getattr(req.address, "city", None)) if getattr(req, "address", None) else {"fee_cents": None}
+    g_sc = 0 if zone_fee["fee_cents"] is not None else (await _zone_surcharge_for(getattr(req.address, "postal_code", None)))["surcharge_cents"] if getattr(req, "address", None) else 0
+    snaps, subtotal = await _resolve_items(req.items, g_sc)
     settings = await _get_settings()
+    _validate_delivery_slot(req.slot, settings)
     earn_rate, redeem_rate = _loyalty_cfg(settings)
-    discount, coupon_code, coupon_err = await _resolve_coupon(req.coupon_code, subtotal, user)
+    discount, coupon_code, coupon_err = await _resolve_coupon(req.coupon_code, subtotal, user, snaps)
     if req.coupon_code and coupon_err:
         raise HTTPException(400, coupon_err)
+    ref_discount, referrer_id, ref_err = await _resolve_referral(req.referral_code, user, snaps)
+    if req.referral_code and ref_err:
+        raise HTTPException(400, ref_err)
     is_customer = user.role != "guest"
     pts_balance = user.loyalty_points if is_customer else 0
     max_redeem_cents = pts_balance * 100 // redeem_rate
     want_cents = max(0, req.redeem_points) * 100 // redeem_rate
-    points_redeem_cents = min(want_cents, max_redeem_cents, max(0, subtotal - discount))
+    points_redeem_cents = min(want_cents, max_redeem_cents, max(0, subtotal - discount - ref_discount))
     points_consumed = round(points_redeem_cents * redeem_rate / 100) if points_redeem_cents else 0
     delivery_fee, dist_km, fee_tier = await compute_delivery_fee(req.address, settings)
-    taxable = max(0, subtotal + delivery_fee - discount - points_redeem_cents)
+    if _free_delivery_applies(subtotal, getattr(req.address, "city", None), settings):
+        delivery_fee, fee_tier = 0, "free_delivery"
+    taxable = max(0, subtotal + delivery_fee - discount - ref_discount - points_redeem_cents)
     tax_cents = (taxable * settings.get("tax_rate_bps", 1300)) // 10000 if _tax_enabled_for_method(settings, req.payment_method) else 0
     total = taxable + tax_cents
 
@@ -2402,10 +2583,13 @@ async def create_order(req: CreateOrderReq, request: Request, user: User = Depen
         tax_cents=tax_cents,
         tax_label=settings.get("tax_label", "HST"),
         discount_cents=discount,
+        referral_discount_cents=ref_discount,
         points_redeemed_cents=points_redeem_cents,
         points_redeemed=points_consumed,
         total_cents=total,
         coupon_code=coupon_code,
+        referral_code=req.referral_code if referrer_id else None,
+        referrer_user_id=referrer_id,
         special_instructions=req.special_instructions or "",
         payment_method=payment_method,
         status=status,
@@ -3255,6 +3439,8 @@ class PricingZoneReq(BaseModel):
     name: str
     region: Optional[str] = None
     postal_prefixes: List[str] = []
+    cities: List[str] = []           # city names served by this zone (match on address.city)
+    fee_cents: Optional[int] = None  # flat delivery fee for this zone; None = surcharge-only zone
     surcharge_cents: int = 0
     enabled: bool = True
 
@@ -3273,6 +3459,8 @@ async def admin_upsert_zone(req: PricingZoneReq, admin=Depends(_current_admin)):
     prefixes = sorted({_normalize_postal(p) for p in req.postal_prefixes if p and p.strip()})
     doc = {"zone_id": zid, "name": req.name.strip(), "region": (req.region or "").strip() or None,
            "postal_prefixes": prefixes,
+           "cities": sorted({c.strip() for c in (req.cities or []) if c and c.strip()}),
+           "fee_cents": (int(req.fee_cents) if req.fee_cents is not None else None),
            "surcharge_cents": int(req.surcharge_cents or 0), "enabled": bool(req.enabled),
            "updated_at": datetime.now(timezone.utc)}
     await db.pricing_zones.update_one({"zone_id": zid}, {"$set": doc}, upsert=True)
@@ -4841,24 +5029,53 @@ async def admin_order_builder(admin=Depends(_current_admin)):
     partners = await db.delivery_partners.find({"is_active": True},
         {"_id": 0, "partner_id": 1, "name": 1, "phone": 1, "vehicle": 1}).sort("name", 1).to_list(50)
 
-    # Compute delivery slots — next 4 weeks of configured delivery_days
-    delivery_days = settings.get("delivery_days", [5, 6])
+    # Compute delivery slots — next 4 weeks. Configured delivery_cycles win
+    # over legacy delivery_days; occurrences whose cutoff already passed are
+    # excluded so customers can only pick a bookable slot.
+    from zoneinfo import ZoneInfo as _ZoneInfo
+    cycles = settings.get("delivery_cycles") or []
     slots: list[dict] = []
-    for wk_offset in range(4):
-        for dow in sorted(set(int(d) for d in delivery_days if 0 <= int(d) <= 6)):
-            # dow is 0=Sun..6=Sat (JS convention)
-            # Python weekday(): 0=Mon..6=Sun. Convert.
-            py_dow = (dow - 1) % 7  # 0=Sun → 6, 1=Mon → 0 …
-            days_ahead = (py_dow - today.weekday()) % 7 + wk_offset * 7
-            if days_ahead == 0 and wk_offset == 0:
-                # today: only allow if there's still time (skip past dates)
-                pass
-            d = today + timedelta(days=days_ahead)
-            slots.append({
-                "date": d.isoformat(),
-                "window": f"{['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][dow]}_delivery",
-                "label": d.strftime("%a, %b %d, %Y"),
-            })
+    if cycles:
+        now_toronto = datetime.now(timezone.utc).astimezone(_ZoneInfo("America/Toronto"))
+        for wk_offset in range(4):
+            for cycle in cycles:
+                dow = int(cycle.get("delivery_day", 0))
+                if not 0 <= dow <= 6:
+                    continue
+                py_dow = (dow - 1) % 7  # 0=Sun → 6, 1=Mon → 0 …
+                days_ahead = (py_dow - today.weekday()) % 7 + wk_offset * 7
+                d = today + timedelta(days=days_ahead)
+                cutoff_day = int(cycle.get("cutoff_day", 0))
+                cutoff_hour = int(cycle.get("cutoff_hour", 12))
+                days_back = (dow - cutoff_day) % 7
+                cutoff_date = d - timedelta(days=days_back)
+                cutoff = datetime(cutoff_date.year, cutoff_date.month, cutoff_date.day,
+                                  cutoff_hour, tzinfo=_ZoneInfo("America/Toronto"))
+                if now_toronto > cutoff:
+                    continue
+                slots.append({
+                    "date": d.isoformat(),
+                    "window": f"{['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][dow]}_delivery",
+                    "label": d.strftime("%a, %b %d, %Y"),
+                    "cycle": cycle.get("label") or "",
+                })
+    else:
+        delivery_days = settings.get("delivery_days", [5, 6])
+        for wk_offset in range(4):
+            for dow in sorted(set(int(d) for d in delivery_days if 0 <= int(d) <= 6)):
+                # dow is 0=Sun..6=Sat (JS convention)
+                # Python weekday(): 0=Mon..6=Sun. Convert.
+                py_dow = (dow - 1) % 7  # 0=Sun → 6, 1=Mon → 0 …
+                days_ahead = (py_dow - today.weekday()) % 7 + wk_offset * 7
+                if days_ahead == 0 and wk_offset == 0:
+                    # today: only allow if there's still time (skip past dates)
+                    pass
+                d = today + timedelta(days=days_ahead)
+                slots.append({
+                    "date": d.isoformat(),
+                    "window": f"{['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][dow]}_delivery",
+                    "label": d.strftime("%a, %b %d, %Y"),
+                })
     # De-dupe (same date might sneak in with different offsets) + sort
     seen: set = set()
     unique_slots = []

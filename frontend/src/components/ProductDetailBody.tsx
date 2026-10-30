@@ -98,8 +98,8 @@ export function ProductDetailBody({
     setTimeout(() => setAdded(false), 1600);
   };
 
-  const imageNode = item.image_url ? (
-    <Image source={{ uri: mediaUrl(item.image_url) }} style={styles.heroImg} contentFit="cover" transition={200} />
+  const imageNode = (selected?.image_url || item.image_url) ? (
+    <Image source={{ uri: mediaUrl(selected?.image_url || item.image_url) }} style={styles.heroImg} contentFit="cover" transition={200} />
   ) : (
     <View style={[styles.heroImg, { alignItems: "center", justifyContent: "center" }]}>
       <Ionicons name="image-outline" size={48} color={colors.textMuted} />
@@ -132,6 +132,9 @@ export function ProductDetailBody({
                   onPress={() => setVariantId(v.variant_id)}
                   style={[styles.variantChip, on && styles.variantChipOn, !v.available && styles.variantChipOff]}
                 >
+                  {v.image_url ? (
+                    <Image source={{ uri: mediaUrl(v.image_url) }} style={{ width: 40, height: 40, borderRadius: 8, marginRight: 8 }} contentFit="cover" />
+                  ) : null}
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.variantTitle, on && { color: colors.primary }]} numberOfLines={2}>{v.title}</Text>
                     {!v.available && <Text style={styles.variantOos}>Sold out</Text>}

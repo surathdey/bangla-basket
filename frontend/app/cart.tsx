@@ -38,6 +38,7 @@ const GUEST_ADDRESS_KEY = "curryco.guest_address.v1";
 
 type Quote = {
   subtotal_cents: number; delivery_fee_cents: number; discount_cents: number;
+  referral_discount_cents?: number; referral_error?: string | null;
   points_redeemed_cents: number; total_cents: number; coupon_code: string | null; points_available: number;
   coupon_error?: string | null; points_redeem_rate?: number; points_earn_preview?: number;
   points_notice?: string | null; points_consumed?: number;
@@ -122,6 +123,7 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
     looksLikeGuestName(user?.name) ? "" : (user?.name || "")
   );
   const [couponCode, setCouponCode] = useState("");
+  const [referralCode, setReferralCode] = useState("");
   const [redeemPoints, setRedeemPoints] = useState(0);
   const [instructions, setInstructions] = useState("");
   const [quote, setQuote] = useState<Quote | null>(null);
@@ -246,13 +248,14 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
       slot: { date: selectedSlot.date, window: selectedSlot.window },
       phone: phone || "0000000",
       coupon_code: couponCode || undefined,
+      referral_code: referralCode || undefined,
       redeem_points: redeemPoints,
       payment_method: paymentMethod,
     });
     if (r.ok) setQuote(r.data);
   };
 
-  useEffect(() => { fetchQuote(); /* eslint-disable-next-line */ }, [items, couponCode, redeemPoints, selectedSlot, paymentMethod, coords, city, postal, guestReady]);
+  useEffect(() => { fetchQuote(); /* eslint-disable-next-line */ }, [items, couponCode, referralCode, redeemPoints, selectedSlot, paymentMethod, coords, city, postal, guestReady]);
 
   const placeAndPay = async () => {
     if (!canPlace) { Alert.alert("Missing info", "Please add your name, delivery address, phone, a valid email and pick a slot."); return; }
@@ -275,6 +278,7 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
         slot: { date: selectedSlot.date, window: selectedSlot.window },
         phone,
         coupon_code: couponCode || undefined,
+        referral_code: referralCode || undefined,
         redeem_points: redeemPoints,
         special_instructions: instructions,
         payment_method: paymentMethod,
@@ -642,6 +646,20 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
                 )}
                 {!!couponCode && quote?.coupon_error && !quote?.coupon_code && (
                   <Text style={styles.couponErr}>{quote.coupon_error}</Text>
+                )}
+                <View style={{ flexDirection: "row", gap: spacing.sm, alignItems: "center", marginTop: spacing.sm }}>
+                  <TextInput testID="cart-referral" placeholder="Referral code (10% off groceries)"
+                    placeholderTextColor={colors.textMuted} value={referralCode} onChangeText={t => setReferralCode(t.toUpperCase())}
+                    style={[styles.input, { flex: 1 }]} autoCapitalize="characters" />
+                  <TouchableOpacity testID="cart-referral-apply" style={styles.applyBtn} onPress={fetchQuote}>
+                    <Text style={styles.applyBtnText}>Apply</Text>
+                  </TouchableOpacity>
+                </View>
+                {!!(quote?.referral_discount_cents) && (
+                  <Text style={styles.couponOK}>✓ Referral applied · saved {centsToCAD(quote.referral_discount_cents || 0)} on groceries</Text>
+                )}
+                {!!referralCode && quote?.referral_error && (
+                  <Text style={styles.couponErr}>{quote.referral_error}</Text>
                 )}
                 {user && user.role !== "guest" ? (
                   <>

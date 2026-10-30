@@ -23,7 +23,7 @@ export type Grocery = {
   price_cents: number; compare_at_cents: number; unit: string;
   image_url: string; images: string[]; in_stock: boolean; is_featured: boolean;
   has_variants: boolean;
-  variants: { variant_id: string; title: string; price_cents: number; compare_at_cents: number; available: boolean }[];
+  variants: { variant_id: string; title: string; price_cents: number; compare_at_cents: number; available: boolean; image_url?: string }[];
 };
 type Cat = { category: string; count: number };
 
