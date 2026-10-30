@@ -2543,9 +2543,13 @@ async def order_quote(req: QuoteOrderReq, user: User = Depends(_current_user)):
     }
 
 
-def _validate_delivery_slot(slot, settings):
+def _validate_delivery_slot(slot, settings, snaps=None):
     """Enforce configured delivery cycles: the slot date must fall on a cycle
     delivery day and be booked before that cycle's cutoff (Toronto time).
+    When snaps are given, a cart containing weekly meals (kind menu /
+    weekly_package) may only use a cycle whose kinds include "menu" (the
+    Thursday cycle); grocery-only carts may use any cycle. A cycle with no
+    kinds configured imposes no kinds restriction (legacy behaviour).
     No cycles configured → legacy behaviour (no validation)."""
     cycles = settings.get("delivery_cycles") or []
     if not cycles:
@@ -2560,6 +2564,10 @@ def _validate_delivery_slot(slot, settings):
         names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
         days = sorted({int(c.get("delivery_day", 0)) for c in cycles})
         raise HTTPException(400, "Please choose a " + " or ".join(names[x] for x in days) + " delivery slot.")
+    if snaps and any(l.get("kind") in ("menu", "weekly_package") for l in snaps):
+        kinds = cycle.get("kinds") or []
+        if kinds and "menu" not in kinds:
+            raise HTTPException(400, "Weekly meals are delivered on Thursdays only. Please choose a Thursday delivery slot.")
     from zoneinfo import ZoneInfo as _ZoneInfo
     cutoff_day = int(cycle.get("cutoff_day", 0))
     cutoff_hour = int(cycle.get("cutoff_hour", 12))
@@ -2570,6 +2578,75 @@ def _validate_delivery_slot(slot, settings):
     now_toronto = datetime.now(timezone.utc).astimezone(_ZoneInfo("America/Toronto"))
     if now_toronto > cutoff:
         raise HTTPException(400, f"Cutoff passed for this delivery slot ({cycle.get('label') or 'delivery'}). Please choose the next available slot.")
+
+
+def _upcoming_delivery_slots(settings, weeks=4):
+    """Customer-facing delivery slots: next `weeks` weeks of cycle occurrences
+    whose cutoff has not passed (Toronto time), each carrying its cycle label
+    and kinds (empty kinds = no restriction, legacy fallback). Mirrors the
+    admin order-builder computation so both surfaces agree."""
+    from zoneinfo import ZoneInfo as _ZoneInfo
+    today = date.today()
+    cycles = settings.get("delivery_cycles") or []
+    slots: list[dict] = []
+    if cycles:
+        now_toronto = datetime.now(timezone.utc).astimezone(_ZoneInfo("America/Toronto"))
+        for wk_offset in range(weeks):
+            for cycle in cycles:
+                dow = int(cycle.get("delivery_day", 0))
+                if not 0 <= dow <= 6:
+                    continue
+                py_dow = (dow - 1) % 7  # 0=Sun → 6, 1=Mon → 0 …
+                days_ahead = (py_dow - today.weekday()) % 7 + wk_offset * 7
+                d = today + timedelta(days=days_ahead)
+                cutoff_day = int(cycle.get("cutoff_day", 0))
+                cutoff_hour = int(cycle.get("cutoff_hour", 12))
+                days_back = (dow - cutoff_day) % 7
+                cutoff_date = d - timedelta(days=days_back)
+                cutoff = datetime(cutoff_date.year, cutoff_date.month, cutoff_date.day,
+                                  cutoff_hour, tzinfo=_ZoneInfo("America/Toronto"))
+                if now_toronto > cutoff:
+                    continue
+                slots.append({
+                    "date": d.isoformat(),
+                    "window": f"{['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][dow]}_delivery",
+                    "label": d.strftime("%a, %b %d, %Y"),
+                    "cycle": cycle.get("label") or "",
+                    "kinds": list(cycle.get("kinds") or []),
+                })
+    else:
+        delivery_days = settings.get("delivery_days", [5, 6])
+        for wk_offset in range(weeks):
+            for dow in sorted(set(int(d) for d in delivery_days if 0 <= int(d) <= 6)):
+                py_dow = (dow - 1) % 7
+                days_ahead = (py_dow - today.weekday()) % 7 + wk_offset * 7
+                d = today + timedelta(days=days_ahead)
+                slots.append({
+                    "date": d.isoformat(),
+                    "window": f"{['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][dow]}_delivery",
+                    "label": d.strftime("%a, %b %d, %Y"),
+                    "cycle": "",
+                    "kinds": [],
+                })
+    seen: set = set()
+    unique_slots = []
+    for s in sorted(slots, key=lambda x: x["date"]):
+        if s["date"] < today.isoformat():
+            continue
+        if s["date"] in seen:
+            continue
+        seen.add(s["date"])
+        unique_slots.append(s)
+    return unique_slots
+
+
+@api.get("/delivery-slots")
+async def public_delivery_slots():
+    """Upcoming bookable delivery slots for the customer cart (cycle-based,
+    cutoff-filtered). The cart filters by cart contents: a cart with weekly
+    meals only uses slots whose kinds include "menu"."""
+    settings = await _get_settings()
+    return {"delivery_slots": _upcoming_delivery_slots(settings)}
 
 
 @api.post("/orders")
@@ -2591,7 +2668,7 @@ async def create_order(req: CreateOrderReq, request: Request, user: User = Depen
     g_sc = 0 if zone_fee["fee_cents"] is not None else (await _zone_surcharge_for(getattr(req.address, "postal_code", None)))["surcharge_cents"] if getattr(req, "address", None) else 0
     snaps, subtotal = await _resolve_items(req.items, g_sc)
     settings = await _get_settings()
-    _validate_delivery_slot(req.slot, settings)
+    _validate_delivery_slot(req.slot, settings, snaps)
     if not _valid_ca_postal(getattr(req.address, "postal_code", None)):
         raise HTTPException(400, "Please enter a valid Canadian postal code for delivery.")
     zone_err = await _out_of_zone_error_postal(getattr(req.address, "postal_code", None))

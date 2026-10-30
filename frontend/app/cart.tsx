@@ -131,11 +131,29 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
   const [placing, setPlacing] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<PaymentSlug>("cod");
   const [publicSettings, setPublicSettings] = useState<PublicSettings | null>(null);
+  const [serverSlots, setServerSlots] = useState<{ date: string; window: string; label: string; cycle?: string; kinds?: string[] }[] | null>(null);
   const [interacBanner, setInteracBanner] = useState<{ email: string; instructions: string; amount: number; orderId: string } | null>(null);
 
+  // Server slots are cycle-based and cutoff-filtered (unlike the legacy
+  // client-side computation from delivery_days). A cart with weekly meals
+  // only uses slots whose cycle kinds include "menu" (Thursdays); grocery-only
+  // carts may use any slot. Falls back to the legacy computation if the
+  // endpoint fails, so the cart never breaks.
+  const hasMeal = items.some(i => i.kind === "menu" || i.kind === "weekly_package");
   const slots = useMemo(
-    () => currentWeekDeliverySlots(publicSettings?.delivery_days),
-    [publicSettings?.delivery_days]
+    () => {
+      if (serverSlots) {
+        return serverSlots
+          .filter(s => {
+            if (!hasMeal) return true;
+            const kinds = s.kinds || [];
+            return kinds.length === 0 || kinds.includes("menu");
+          })
+          .map(s => ({ date: s.date, window: s.window, label: s.label }));
+      }
+      return currentWeekDeliverySlots(publicSettings?.delivery_days);
+    },
+    [serverSlots, hasMeal, publicSettings?.delivery_days]
   );
   const [selectedSlot, setSelectedSlot] = useState(slots[0]);
 
@@ -147,6 +165,15 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slots]);
+
+  // Fetch cycle-based delivery slots once (cutoff-filtered on the server).
+  useEffect(() => {
+    (async () => {
+      const r = await api.get<{ delivery_slots: { date: string; window: string; label: string; cycle?: string; kinds?: string[] }[] }>("/delivery-slots");
+      if (r.ok && Array.isArray(r.data.delivery_slots)) setServerSlots(r.data.delivery_slots);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Fetch payment-method configuration once — needed to render the right options + auto-tax choice.
   useEffect(() => {
