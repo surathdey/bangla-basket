@@ -1872,6 +1872,42 @@ async def _zone_fee_for_city(city: Optional[str]) -> dict:
     return {"zone_id": None, "zone_name": None, "fee_cents": None}
 
 
+# City spellings kept only as matching aliases (not real display names).
+_ZONE_CITY_ALIASES = {"st catherine", "branford", "new market", "kwgc", "niagara"}
+
+
+async def _delivery_area() -> tuple:
+    """(has_zones, display_cities, normalized_set) from enabled pricing zones
+    that carry a city list. has_zones False → the zone system is not in use
+    (legacy km-tier behaviour, no rejection)."""
+    display: set = set()
+    norm: set = set()
+    has = False
+    async for z in db.pricing_zones.find({"enabled": {"$ne": False}}):
+        cities = [c.strip() for c in (z.get("cities") or []) if c and c.strip()]
+        if not cities:
+            continue
+        has = True
+        for c in cities:
+            norm.add(_norm_city(c))
+            if _norm_city(c) not in _ZONE_CITY_ALIASES:
+                display.add(c.strip())
+    return has, sorted(display), norm
+
+
+async def _out_of_zone_error(city: Optional[str]) -> Optional[str]:
+    """Rejection message when a delivery city falls outside the delivery
+    area, else None. Only enforced when delivery zones are configured."""
+    has, display, norm = await _delivery_area()
+    if not has:
+        return None
+    if _norm_city(city) in norm:
+        return None
+    cities = ", ".join(display)
+    return (f"Sorry — we deliver only in the following areas: {cities}. "
+            "We don't deliver anywhere else yet.")
+
+
 async def compute_delivery_fee(address, settings):
     """Returns (fee_cents, distance_km_or_None, tier_label). A fee zone matching
     the delivery city wins over km tiers; otherwise the km-tier table from
@@ -2431,6 +2467,11 @@ async def order_quote(req: QuoteOrderReq, user: User = Depends(_current_user)):
     earn_rate, redeem_rate = _loyalty_cfg(settings)
     discount, coupon, coupon_err = await _resolve_coupon(req.coupon_code, subtotal, user, snaps)
     ref_discount, _, ref_err = await _resolve_referral(req.referral_code, user, snaps)
+    # Out-of-zone notice: only once the customer has typed a city (blank city
+    # means the address form is still open, not a rejection).
+    delivery_error = None
+    if req.address and (req.address.city or "").strip():
+        delivery_error = await _out_of_zone_error(req.address.city)
     is_customer = user.role != "guest"
     pts_balance = user.loyalty_points if is_customer else 0
     # redeem_points are POINTS; discount value in cents = points*100 // redeem_rate
@@ -2468,6 +2509,7 @@ async def order_quote(req: QuoteOrderReq, user: User = Depends(_current_user)):
         "discount_cents": discount,
         "referral_discount_cents": ref_discount,
         "referral_error": ref_err,
+        "delivery_error": delivery_error,
         "points_redeemed_cents": points_redeem_cents,
         "points_consumed": points_consumed,
         "points_notice": points_notice,
@@ -2532,6 +2574,9 @@ async def create_order(req: CreateOrderReq, request: Request, user: User = Depen
     snaps, subtotal = await _resolve_items(req.items, g_sc)
     settings = await _get_settings()
     _validate_delivery_slot(req.slot, settings)
+    zone_err = await _out_of_zone_error(getattr(req.address, "city", None))
+    if zone_err:
+        raise HTTPException(400, zone_err)
     earn_rate, redeem_rate = _loyalty_cfg(settings)
     discount, coupon_code, coupon_err = await _resolve_coupon(req.coupon_code, subtotal, user, snaps)
     if req.coupon_code and coupon_err:

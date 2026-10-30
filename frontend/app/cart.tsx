@@ -39,6 +39,7 @@ const GUEST_ADDRESS_KEY = "curryco.guest_address.v1";
 type Quote = {
   subtotal_cents: number; delivery_fee_cents: number; discount_cents: number;
   referral_discount_cents?: number; referral_error?: string | null;
+  delivery_error?: string | null;
   points_redeemed_cents: number; total_cents: number; coupon_code: string | null; points_available: number;
   coupon_error?: string | null; points_redeem_rate?: number; points_earn_preview?: number;
   points_notice?: string | null; points_consumed?: number;
@@ -228,7 +229,7 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
   };
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-  const canPlace = items.length > 0 && recipientName.trim().length >= 2 && line1.trim().length > 3 && postal.trim().length >= 5 && phone.trim().length >= 7 && emailValid && selectedSlot;
+  const canPlace = items.length > 0 && recipientName.trim().length >= 2 && line1.trim().length > 3 && postal.trim().length >= 5 && phone.trim().length >= 7 && emailValid && selectedSlot && !quote?.delivery_error;
 
   const fetchQuote = async () => {
     if (items.length === 0) { setQuote(null); return; }
@@ -258,7 +259,10 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
   useEffect(() => { fetchQuote(); /* eslint-disable-next-line */ }, [items, couponCode, referralCode, redeemPoints, selectedSlot, paymentMethod, coords, city, postal, guestReady]);
 
   const placeAndPay = async () => {
-    if (!canPlace) { Alert.alert("Missing info", "Please add your name, delivery address, phone, a valid email and pick a slot."); return; }
+    if (!canPlace) {
+      if (quote?.delivery_error) { Alert.alert("Delivery area", quote.delivery_error); return; }
+      Alert.alert("Missing info", "Please add your name, delivery address, phone, a valid email and pick a slot."); return;
+    }
     setPlacing(true);
     try {
       // Safety: make sure an anonymous web shopper has a session before ordering.
@@ -598,6 +602,9 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
                     placeholderTextColor={colors.textMuted} value={postal} onChangeText={(t) => { setPostal(t); setCoords(null); }}
                     style={[styles.input, { flex: 1 }]} autoCapitalize="characters" />
                 </View>
+                {!!quote?.delivery_error && (
+                  <Text testID="cart-delivery-error" style={styles.couponErr}>{quote.delivery_error}</Text>
+                )}
                 <TextInput
                   testID="cart-phone"
                   placeholder="Phone number (for delivery updates)"
