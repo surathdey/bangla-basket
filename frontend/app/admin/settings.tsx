@@ -485,10 +485,10 @@ export default function AdminSettings() {
         <Text style={styles.sectionTitle}>Owner Notifications</Text>
         <View style={styles.card}>
           <Field label="Owner Email (order & delivery alerts)" testID="set-notify-email"
-            value={s.notify_email || ""} onChange={(t: string) => setS({ ...s, notify_email: t })} keyboardType="email-address" placeholder="owner@restaurant.com" />
+            value={s.notify_email || ""} onChange={(t: string) => setS({ ...s, notify_email: t })} keyboardType="email-address" placeholder="owner@restaurant.com, owner2@restaurant.com" />
           <Field label="Owner Phone (SMS alerts — optional)" testID="set-notify-phone"
-            value={s.notify_phone || ""} onChange={(t: string) => setS({ ...s, notify_phone: t })} keyboardType="phone-pad" placeholder="+14370000000" />
-          <Text style={styles.hint}>A copy of every new order and every completed delivery is sent to the owner email (and SMS if a phone is set).</Text>
+            value={s.notify_phone || ""} onChange={(t: string) => setS({ ...s, notify_phone: t })} keyboardType="phone-pad" placeholder="+14370000000, +16470000000" />
+          <Text style={styles.hint}>A copy of every new order and every completed delivery is sent to each owner email (and SMS to each phone, if set). Separate multiple emails or phones with commas.</Text>
         </View>
       </View>
 

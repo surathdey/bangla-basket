@@ -5801,26 +5801,34 @@ async def _notify_owner_delivered(order: dict):
     proof_line = f" Proof photo: {_public_url(proof)}" if proof else ""
 
     # ---- Email (Resend) ----
-    to_email = settings.get("notify_email") or ADMIN_EMAIL
+    owner_emails = _notify_list(settings.get("notify_email")) or ([ADMIN_EMAIL] if ADMIN_EMAIL else [])
     try:
-        if to_email and _email.is_configured():
+        if _email.is_configured():
             html = (
                 f"<h2>Order {oid} delivered ✅</h2>"
                 f"<p><b>{BRAND_NAME}</b></p>"
                 f"<p>Customer: {cust}<br/>Total: ${total:.2f}<br/>Delivered by: {partner}</p>"
                 + (f'<p><a href="{_public_url(proof)}">View delivery proof photo</a></p>' if proof else "")
             )
-            await _email.send_email(to=to_email, subject=f"{BRAND_NAME} — Order {oid} delivered", html=html)
+            for to_email in owner_emails:
+                try:
+                    await _email.send_email(to=to_email, subject=f"{BRAND_NAME} — Order {oid} delivered", html=html)
+                except Exception as e:
+                    logging.warning(f"[notify.email] {e}")
     except Exception as e:
         logging.warning(f"[notify.email] {e}")
 
     # ---- SMS (Twilio, using owner-captured settings) ----
     tw = (settings.get("integrations") or {}).get("twilio") or {}
-    to_phone = settings.get("notify_phone") or NOTIFY_PHONE_DEFAULT
+    owner_phones = _notify_list(settings.get("notify_phone")) or ([NOTIFY_PHONE_DEFAULT] if NOTIFY_PHONE_DEFAULT else [])
     try:
-        if tw.get("account_sid") and tw.get("auth_token_encrypted") and tw.get("from_number") and to_phone:
+        if tw.get("account_sid") and tw.get("auth_token_encrypted") and tw.get("from_number"):
             body = f"{BRAND_NAME}: Order {oid} delivered to {cust}. Total ${total:.2f} by {partner}.{proof_line}"
-            await _twilio.send_sms(tw["account_sid"], tw["auth_token_encrypted"], tw["from_number"], to_phone, body)
+            for to_phone in owner_phones:
+                try:
+                    await _twilio.send_sms(tw["account_sid"], tw["auth_token_encrypted"], tw["from_number"], to_phone, body)
+                except Exception as e:
+                    logging.warning(f"[notify.sms] {e}")
     except Exception as e:
         logging.warning(f"[notify.sms] {e}")
 
@@ -5859,6 +5867,18 @@ def _payment_note(order: dict, settings: dict) -> str:
         interac_email = (settings.get("payment_methods") or {}).get("interac", {}).get("email", "")
         return f"Interac e-Transfer — please send CA${total:.2f} to {interac_email} (add order {order.get('order_id','')} in the note)."
     return f"Total CA${total:.2f}."
+
+
+def _notify_list(value) -> list:
+    """Split a comma-separated notify field into clean values.
+
+    Single values pass through unchanged; empty pieces are dropped, so
+    "a@x, b@y" notifies both owners while "a@x" behaves exactly as before.
+    """
+    if not value:
+        return []
+    parts = list(value) if isinstance(value, (list, tuple)) else str(value).split(",")
+    return [str(p).strip() for p in parts if str(p).strip()]
 
 
 async def _send_sms_via_settings(settings: dict, to: str, body: str):
@@ -5909,11 +5929,11 @@ async def _notify_order_created(order: dict, settings: dict, user_doc: dict):
     except Exception as e:
         logging.warning(f"[order.notify.cust_sms] {e}")
 
-    # ---- Owner email + SMS ----
-    owner_email = settings.get("notify_email") or ADMIN_EMAIL
-    owner_phone = settings.get("notify_phone") or ""
+    # ---- Owner email + SMS (notify fields accept comma-separated multiples) ----
+    owner_emails = _notify_list(settings.get("notify_email")) or ([ADMIN_EMAIL] if ADMIN_EMAIL else [])
+    owner_phones = _notify_list(settings.get("notify_phone"))
     try:
-        if owner_email and _email.is_configured():
+        if _email.is_configured():
             html = (
                 f"<h2>New order #{ref} 🛎️</h2>"
                 f"<p>Customer: {cust} · {cust_phone} · {cust_email}</p>"
@@ -5922,12 +5942,29 @@ async def _notify_order_created(order: dict, settings: dict, user_doc: dict):
                 f"<p>Deliver to: {(order.get('address') or {}).get('line1','')}, {(order.get('address') or {}).get('city','')}</p>"
                 f"<p><a href='{invoice_url}'>Invoice</a></p>"
             )
-            await _email.send_email(to=owner_email, subject=f"{BRAND_NAME} — New order #{ref} (CA${total:.2f})", html=html)
+            for to_email in owner_emails:
+                try:
+                    await _email.send_email(to=to_email, subject=f"{BRAND_NAME} — New order #{ref} (CA${total:.2f})", html=html)
+                except Exception as e:
+                    logging.warning(f"[order.notify.owner_email] {e}")
     except Exception as e:
         logging.warning(f"[order.notify.owner_email] {e}")
     try:
-        if owner_phone:
-            await _send_sms_via_settings(settings, owner_phone, f"{BRAND_NAME}: New order #{ref} from {cust}. Total CA${total:.2f} ({order.get('payment_method','').upper()}).")
+        if owner_phones:
+            addr = order.get("address") or {}
+            slot = order.get("slot") or {}
+            body = (
+                f"{BRAND_NAME}: New order #{ref} — {cust}\n"
+                f"{items_txt}\n"
+                f"Total CA${total:.2f} ({order.get('payment_method','').upper()})\n"
+                f"Deliver: {addr.get('line1','')}, {addr.get('city','')}\n"
+                f"Slot: {slot.get('date','')} {slot.get('window','').replace('_',' ')}"
+            )
+            for to_phone in owner_phones:
+                try:
+                    await _send_sms_via_settings(settings, to_phone, body)
+                except Exception as e:
+                    logging.warning(f"[order.notify.owner_sms] {e}")
     except Exception as e:
         logging.warning(f"[order.notify.owner_sms] {e}")
 
