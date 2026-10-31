@@ -41,7 +41,7 @@ type Quote = {
   referral_discount_cents?: number; referral_error?: string | null;
   delivery_error?: string | null;
   points_redeemed_cents: number; total_cents: number; coupon_code: string | null; points_available: number;
-  coupon_error?: string | null; points_redeem_rate?: number; points_earn_preview?: number;
+  coupon_error?: string | null; auto_applied_coupon?: boolean; points_redeem_rate?: number; points_earn_preview?: number;
   points_notice?: string | null; points_consumed?: number;
   tax_cents?: number; tax_label?: string; tax_enabled?: boolean;
   delivery_distance_km?: number | null; delivery_fee_tier?: string;
@@ -774,7 +774,7 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
                         ~{quote.delivery_distance_km} km from our Milton kitchen
                       </Text>
                     )}
-                    {quote.discount_cents > 0 && <SumRow label="Coupon discount" value={`-${centsToCAD(quote.discount_cents)}`} color={colors.success} />}
+                    {quote.discount_cents > 0 && <SumRow label={quote.auto_applied_coupon ? "First time discount" : "Coupon discount"} value={`-${centsToCAD(quote.discount_cents)}`} color={colors.success} />}
                     {quote.points_redeemed_cents > 0 && <SumRow label="Points redeemed" value={`-${centsToCAD(quote.points_redeemed_cents)}`} color={colors.success} />}
                     {!!quote.tax_cents && quote.tax_cents > 0 && (
                       <SumRow label={`${quote.tax_label || "Tax"} (${((quote.tax_cents / Math.max(1, quote.subtotal_cents + quote.delivery_fee_cents - quote.discount_cents - quote.points_redeemed_cents)) * 100).toFixed(0)}%)`} value={centsToCAD(quote.tax_cents)} />

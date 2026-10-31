@@ -98,7 +98,7 @@ export default function ShopAccount() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.couponCode}>{c.code}{c.personal ? "  ·  Yours" : ""}</Text>
                 <Text style={styles.couponDesc} numberOfLines={2}>{c.description}</Text>
-                {(c.expired || c.used) && <Text style={styles.couponState}>{c.used ? "Used" : "Expired"}</Text>}
+                {(c.expired || c.used) && <Text style={styles.couponState}>{c.used ? "Coupon applied" : "Expired"}</Text>}
               </View>
             </View>
           ))}

@@ -2402,6 +2402,22 @@ async def _resolve_coupon(code: Optional[str], subtotal: int, user: User, snapsh
     return discount, c["code"], None
 
 
+async def _auto_first_time_coupon(user: User, subtotal: int, snapshots=None):
+    """First-time discount, applied by default: when the customer did not type
+    a coupon code, resolve their unused personal welcome coupon (the one
+    issued at first login: owned by the user, applies_to all_except_weekly_meal).
+    Returns (discount_cents, code) or (0, None). Never an error, and never
+    applied when the discount base is zero (e.g. a weekly-meal-only cart)."""
+    if getattr(user, "role", None) == "guest":
+        return 0, None
+    async for c in db.coupons.find({"owner_user_id": user.user_id, "active": True,
+                                    "applies_to": "all_except_weekly_meal"}, {"_id": 0}):
+        d, code, err = await _resolve_coupon(c["code"], subtotal, user, snapshots)
+        if not err and d > 0:
+            return d, code
+    return 0, None
+
+
 async def _record_loyalty_and_coupon(order: dict, user_id: str):
     """After an order is confirmed/paid: write points ledger, coupon redemption + usage."""
     now = datetime.now(timezone.utc)
@@ -2492,6 +2508,11 @@ async def order_quote(req: QuoteOrderReq, user: User = Depends(_current_user)):
     settings = await _get_settings()
     earn_rate, redeem_rate = _loyalty_cfg(settings)
     discount, coupon, coupon_err = await _resolve_coupon(req.coupon_code, subtotal, user, snaps)
+    auto_applied_coupon = False
+    if not req.coupon_code:
+        # First-time discount applies by default — no code to type.
+        discount, coupon = await _auto_first_time_coupon(user, subtotal, snaps)
+        auto_applied_coupon = bool(coupon)
     ref_discount, _, ref_err = await _resolve_referral(req.referral_code, user, snaps)
     # Out-of-zone notice: only once the customer has typed a valid postal code
     # (blank/invalid postal means the address form is still open, not a rejection).
@@ -2542,6 +2563,7 @@ async def order_quote(req: QuoteOrderReq, user: User = Depends(_current_user)):
         "total_cents": total,
         "coupon_code": coupon,
         "coupon_error": coupon_err,
+        "auto_applied_coupon": auto_applied_coupon,
         "items_snapshot": snaps,
         "points_available": pts_balance,
         "points_redeem_rate": redeem_rate,
@@ -2684,6 +2706,10 @@ async def create_order(req: CreateOrderReq, request: Request, user: User = Depen
         raise HTTPException(400, zone_err)
     earn_rate, redeem_rate = _loyalty_cfg(settings)
     discount, coupon_code, coupon_err = await _resolve_coupon(req.coupon_code, subtotal, user, snaps)
+    if not req.coupon_code:
+        # First-time discount applies by default — same rule as the quote, so
+        # the order honors exactly the discount the cart showed.
+        discount, coupon_code = await _auto_first_time_coupon(user, subtotal, snaps)
     if req.coupon_code and coupon_err:
         raise HTTPException(400, coupon_err)
     ref_discount, referrer_id, ref_err = await _resolve_referral(req.referral_code, user, snaps)
