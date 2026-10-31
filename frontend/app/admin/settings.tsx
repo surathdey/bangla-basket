@@ -45,6 +45,7 @@ type Settings = {
   fish_service_price_cents?: number;
   loyalty_earn_points_per_dollar?: number;
   loyalty_redeem_points_per_dollar?: number;
+  loyalty_enabled?: boolean;
   first_time_coupon_enabled?: boolean;
   first_time_coupon_percent?: number;
   notify_email?: string;
@@ -92,6 +93,8 @@ export default function AdminSettings() {
       if (!Array.isArray(r.data.delivery_days)) r.data.delivery_days = [5, 6];
       // Keep operating_hours label in sync with the structured fields on load.
       r.data.operating_hours = buildOperatingHoursLabel(r.data.ordering_days, r.data.delivery_days);
+      // Loyalty defaults ON for docs saved before the switch existed.
+      if (r.data.loyalty_enabled === undefined) r.data.loyalty_enabled = true;
       setS(r.data);
       setFeeStr(((r.data.default_delivery_fee_cents ?? 0) / 100).toFixed(2));
       setMinStr(((r.data.minimum_order_cents ?? 0) / 100).toFixed(2));
@@ -326,7 +329,18 @@ export default function AdminSettings() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Loyalty & Rewards</Text>
         <View style={styles.card}>
-          <Text style={styles.label}>EARN RATE — points per $1 spent</Text>
+          <View style={styles.ribbonToggleRow}>
+            <Text style={styles.label}>Loyalty points</Text>
+            <TouchableOpacity
+              testID="set-loyalty-toggle"
+              onPress={() => setS({ ...s, loyalty_enabled: !(s.loyalty_enabled !== false) })}
+              style={[styles.togglePill, (s.loyalty_enabled !== false) ? styles.togglePillOn : styles.togglePillOff]}
+            >
+              <View style={[styles.toggleKnob, (s.loyalty_enabled !== false) && { alignSelf: "flex-end" }]} />
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.helperText}>When off, points are hidden everywhere and no points are earned or redeemed. Balances are kept and return when switched back on.</Text>
+          <Text style={[styles.label, { marginTop: spacing.md }]}>EARN RATE — points per $1 spent</Text>
           <Text style={styles.helperText}>Points awarded on the order subtotal (before tax/fees). Default 1.</Text>
           <TextInput
             testID="set-loyalty-earn"
@@ -352,28 +366,8 @@ export default function AdminSettings() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Coupons</Text>
         <View style={styles.card}>
-          <View style={styles.ribbonToggleRow}>
-            <View style={{ flex: 1, paddingRight: spacing.md }}>
-              <Text style={styles.label}>First-time coupon</Text>
-              <Text style={styles.hint}>Auto-issue a percentage coupon when a customer logs in for the first time. Shows in their My Coupons list.</Text>
-            </View>
-            <TouchableOpacity
-              testID="set-first-coupon-toggle"
-              onPress={() => setS({ ...s, first_time_coupon_enabled: !(s.first_time_coupon_enabled !== false) })}
-              style={[styles.togglePill, (s.first_time_coupon_enabled !== false) ? styles.togglePillOn : styles.togglePillOff]}
-            >
-              <View style={[styles.toggleKnob, (s.first_time_coupon_enabled !== false) && { alignSelf: "flex-end" }]} />
-            </TouchableOpacity>
-          </View>
-          <Text style={[styles.label, { marginTop: spacing.md }]}>FIRST-TIME COUPON PERCENT</Text>
-          <TextInput
-            testID="set-first-coupon-percent"
-            style={styles.input}
-            keyboardType="number-pad"
-            value={String(s.first_time_coupon_percent ?? 15)}
-            onChangeText={t => setS({ ...s, first_time_coupon_percent: parseInt(t) || 0 })}
-            placeholder="15" placeholderTextColor={colors.textMuted}
-          />
+          <Text style={styles.label}>Welcome coupon</Text>
+          <Text style={styles.hint}>One shared code for everyone (WELCOME20, 20% off, once per customer). It is no longer issued per customer at login — to change the percent, edit the code itself below.</Text>
           <TouchableOpacity testID="goto-coupons" style={styles.linkBtn} onPress={() => router.push("/admin/coupons")}>
             <Ionicons name="pricetags-outline" size={16} color={colors.primary} />
             <Text style={styles.linkBtnText}>Manage coupon codes →</Text>

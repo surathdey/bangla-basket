@@ -58,17 +58,20 @@ export default function AdminCustomers() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [integrationsCfg, setIntegrationsCfg] = useState({ email: false, twilio: false, drive: false, emailRecipient: "" });
+  const [loyaltyEnabled, setLoyaltyEnabled] = useState(true);
   const [detailCache, setDetailCache] = useState<Record<string, { orders: Order[]; addresses: any[] }>>({});
   const [loadingDetail, setLoadingDetail] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [r, ir] = await Promise.all([
+    const [r, ir, ls] = await Promise.all([
       adminApi.get<Customer[]>("/admin/customers"),
       adminApi.get<any>("/admin/integrations"),
+      adminApi.get<{ loyalty_enabled?: boolean }>("/admin/settings"),
     ]);
     if (r.status === 401) { router.replace("/admin"); return; }
     if (r.ok) setCustomers(r.data || []);
+    if (ls.ok) setLoyaltyEnabled(ls.data?.loyalty_enabled !== false);
     if (ir.ok) setIntegrationsCfg({
       email: !!ir.data?.email?.configured && !!ir.data?.email?.recipient,
       twilio: !!ir.data?.twilio?.configured,
@@ -226,7 +229,7 @@ export default function AdminCustomers() {
                           <Text style={styles.guestPillText}>GUEST</Text>
                         </View>
                       )}
-                      {c.loyalty_points > 0 && (
+                      {loyaltyEnabled && c.loyalty_points > 0 && (
                         <View style={styles.pointsPill}>
                           <Ionicons name="star" size={10} color="#B45309" />
                           <Text style={styles.pointsPillText}>{c.loyalty_points} pts</Text>

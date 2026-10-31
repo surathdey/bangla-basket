@@ -9,7 +9,7 @@ import { EmailAuthModal } from "@/src/components/EmailAuthModal";
 const INK = "#011838";
 
 /** Top-right login/account control for the web storefront. No login gate. */
-export function ShopAccountButton({ compact = false }: { compact?: boolean }) {
+export function ShopAccountButton({ compact = false, loyaltyEnabled = true }: { compact?: boolean; loyaltyEnabled?: boolean }) {
   const { user, signIn, signInAsGuest } = useAuth();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -42,7 +42,7 @@ export function ShopAccountButton({ compact = false }: { compact?: boolean }) {
               <Text style={styles.title}>Sign in to Bangla Basket</Text>
               <TouchableOpacity onPress={() => setOpen(false)}><Ionicons name="close" size={24} color={colors.textMuted} /></TouchableOpacity>
             </View>
-            <Text style={styles.hint}>Save addresses, track orders, earn loyalty points & use coupons.</Text>
+            <Text style={styles.hint}>{loyaltyEnabled ? "Save addresses, track orders, earn loyalty points & use coupons." : "Save addresses, track orders & use coupons."}</Text>
 
             <TouchableOpacity testID="web-google-btn" style={styles.google} onPress={() => { setOpen(false); signIn(); }}>
               <Ionicons name="logo-google" size={18} color="#111" />

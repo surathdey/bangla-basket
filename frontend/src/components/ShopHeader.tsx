@@ -62,13 +62,17 @@ export function ShopHeader({ active, navHandlers, showAnnounce = true }: Props) 
   const [ribbon, setRibbon] = useState<{ enabled: boolean; text: string }>({
     enabled: true, text: "Free delivery on orders over $150",
   });
+  const [loyaltyEnabled, setLoyaltyEnabled] = useState(true);
   useEffect(() => {
     (async () => {
-      const r = await api.get<{ delivery_ribbon_enabled?: boolean; delivery_ribbon_text?: string }>("/settings");
-      if (r.ok) setRibbon({
-        enabled: r.data?.delivery_ribbon_enabled !== false,
-        text: (r.data?.delivery_ribbon_text || "Free delivery on orders over $150").trim(),
-      });
+      const r = await api.get<{ delivery_ribbon_enabled?: boolean; delivery_ribbon_text?: string; loyalty_enabled?: boolean }>("/settings");
+      if (r.ok) {
+        setRibbon({
+          enabled: r.data?.delivery_ribbon_enabled !== false,
+          text: (r.data?.delivery_ribbon_text || "Free delivery on orders over $150").trim(),
+        });
+        setLoyaltyEnabled(r.data?.loyalty_enabled !== false);
+      }
     })();
   }, []);
   const showRibbon = showAnnounce && ribbon.enabled && !!ribbon.text;
@@ -108,7 +112,7 @@ export function ShopHeader({ active, navHandlers, showAnnounce = true }: Props) 
           )}
 
           <View style={styles.navRight}>
-            <ShopAccountButton compact={isNarrow} />
+            <ShopAccountButton compact={isNarrow} loyaltyEnabled={loyaltyEnabled} />
             {loggedIn && (
               <TouchableOpacity testID="shop-refer-btn" style={styles.navGhost} onPress={() => router.push("/shop/account")}>
                 <Ionicons name="gift-outline" size={16} color={INK} />

@@ -488,6 +488,10 @@ class BusinessSettings(BaseModel):
     loyalty_earn_points_per_dollar: float = 1.0
     # Redemption rate: how many points equal $1 of discount (e.g. 25 → 25 pts = $1).
     loyalty_redeem_points_per_dollar: int = 25
+    # Master switch: when False, points are hidden everywhere and no points
+    # are earned or redeemed (balances are kept, not deleted — flipping back
+    # on restores everything).
+    loyalty_enabled: bool = True
     # ---- First-time coupon (Admin → Settings → Coupons) ----
     # When enabled, a unique percentage coupon is auto-issued on a customer's first login.
     first_time_coupon_enabled: bool = True
@@ -2342,6 +2346,11 @@ def _loyalty_cfg(settings: dict):
     return earn, max(1, redeem)
 
 
+def _loyalty_enabled(settings: dict) -> bool:
+    """Master loyalty switch — default ON for docs saved before the flag existed."""
+    return bool(settings.get("loyalty_enabled", True))
+
+
 async def _resolve_coupon(code: Optional[str], subtotal: int, user: User, snapshots=None):
     """Validate a coupon against all rules. Returns (discount_cents, coupon_code, error_or_None).
     The discount base depends on applies_to: grocery_only / weekly_meal_only /
@@ -2414,10 +2423,13 @@ async def _record_loyalty_and_coupon(order: dict, user_id: str):
     oid = order.get("order_id")
     awarded = int(order.get("points_awarded", 0) or 0)
     redeemed_pts = int(order.get("points_redeemed", 0) or 0)
-    if awarded:
+    # Loyalty switched off between placement and confirmation freezes points
+    # (coupon + referral rewards below are unaffected).
+    pts_on = _loyalty_enabled(await _get_settings())
+    if awarded and pts_on:
         await db.points_ledger.insert_one({"user_id": user_id, "order_id": oid, "delta": awarded,
                                            "type": "earn", "ts": now, "note": f"Earned on order {oid[-6:].upper()}"})
-    if redeemed_pts:
+    if redeemed_pts and pts_on:
         await db.points_ledger.insert_one({"user_id": user_id, "order_id": oid, "delta": -redeemed_pts,
                                            "type": "redeem", "ts": now, "note": f"Redeemed on order {oid[-6:].upper()}"})
     code = order.get("coupon_code")
@@ -2497,6 +2509,7 @@ async def order_quote(req: QuoteOrderReq, user: User = Depends(_current_user)):
     snaps, subtotal = await _resolve_items(req.items, g_sc)
     settings = await _get_settings()
     earn_rate, redeem_rate = _loyalty_cfg(settings)
+    loyalty_on = _loyalty_enabled(settings)
     discount, coupon, coupon_err = await _resolve_coupon(req.coupon_code, subtotal, user, snaps)
     auto_applied_coupon = False
     if not req.coupon_code:
@@ -2512,7 +2525,8 @@ async def order_quote(req: QuoteOrderReq, user: User = Depends(_current_user)):
     is_customer = user.role != "guest"
     pts_balance = user.loyalty_points if is_customer else 0
     # redeem_points are POINTS; discount value in cents = points*100 // redeem_rate
-    max_redeem_cents = pts_balance * 100 // redeem_rate
+    # When loyalty is switched off, no redemption at all (requests are ignored).
+    max_redeem_cents = pts_balance * 100 // redeem_rate if loyalty_on else 0
     want_cents = max(0, req.redeem_points) * 100 // redeem_rate
     points_redeem_cents = min(want_cents, max_redeem_cents, max(0, subtotal - discount - ref_discount))
     points_consumed = round(points_redeem_cents * redeem_rate / 100) if points_redeem_cents else 0
@@ -2520,7 +2534,7 @@ async def order_quote(req: QuoteOrderReq, user: User = Depends(_current_user)):
     # or capped at the order value) instead of silently clamping it.
     requested_pts = max(0, req.redeem_points)
     points_notice = None
-    if requested_pts > points_consumed:
+    if loyalty_on and requested_pts > points_consumed:
         if requested_pts > pts_balance:
             points_notice = f"Only {pts_balance} points available — {points_consumed} applied."
         else:
@@ -2532,7 +2546,7 @@ async def order_quote(req: QuoteOrderReq, user: User = Depends(_current_user)):
     tax_on = _tax_enabled_for_method(settings, req.payment_method)
     tax_cents = (taxable * settings.get("tax_rate_bps", 1300)) // 10000 if tax_on else 0
     total = taxable + tax_cents
-    earn_preview = int((subtotal / 100.0) * earn_rate) if is_customer else 0
+    earn_preview = int((subtotal / 100.0) * earn_rate) if (is_customer and loyalty_on) else 0
     return {
         "subtotal_cents": subtotal,
         "delivery_fee_cents": delivery_fee,
@@ -2559,6 +2573,7 @@ async def order_quote(req: QuoteOrderReq, user: User = Depends(_current_user)):
         "points_redeem_rate": redeem_rate,
         "points_earn_rate": earn_rate,
         "points_earn_preview": earn_preview,
+        "loyalty_enabled": loyalty_on,
         "is_guest": not is_customer,
     }
 
@@ -2695,6 +2710,7 @@ async def create_order(req: CreateOrderReq, request: Request, user: User = Depen
     if zone_err:
         raise HTTPException(400, zone_err)
     earn_rate, redeem_rate = _loyalty_cfg(settings)
+    loyalty_on = _loyalty_enabled(settings)
     discount, coupon_code, coupon_err = await _resolve_coupon(req.coupon_code, subtotal, user, snaps)
     if not req.coupon_code:
         # First-time discount applies by default — same rule as the quote, so
@@ -2707,7 +2723,7 @@ async def create_order(req: CreateOrderReq, request: Request, user: User = Depen
         raise HTTPException(400, ref_err)
     is_customer = user.role != "guest"
     pts_balance = user.loyalty_points if is_customer else 0
-    max_redeem_cents = pts_balance * 100 // redeem_rate
+    max_redeem_cents = pts_balance * 100 // redeem_rate if loyalty_on else 0
     want_cents = max(0, req.redeem_points) * 100 // redeem_rate
     points_redeem_cents = min(want_cents, max_redeem_cents, max(0, subtotal - discount - ref_discount))
     points_consumed = round(points_redeem_cents * redeem_rate / 100) if points_redeem_cents else 0
@@ -2722,7 +2738,7 @@ async def create_order(req: CreateOrderReq, request: Request, user: User = Depen
     payment_method = req.payment_method if req.payment_method in ("card", "cod", "interac", "paypal") else "card"
     now = datetime.now(timezone.utc)
 
-    earn_on_subtotal = int((subtotal / 100.0) * earn_rate) if is_customer else 0
+    earn_on_subtotal = int((subtotal / 100.0) * earn_rate) if (is_customer and loyalty_on) else 0
     if payment_method in ("cod", "interac"):
         status = "confirmed"
         payment_status = "cod_pending" if payment_method == "cod" else "interac_pending"
@@ -3051,7 +3067,7 @@ async def checkout_status_finalize(session_id: str):
     earn_rate, _ = _loyalty_cfg(settings)
     buyer = await db.users.find_one({"user_id": order["user_id"]}, {"_id": 0}) or {}
     is_customer = buyer.get("role") != "guest"
-    points_awarded = int((order["subtotal_cents"] / 100.0) * earn_rate) if is_customer else 0
+    points_awarded = int((order["subtotal_cents"] / 100.0) * earn_rate) if (is_customer and _loyalty_enabled(settings)) else 0
     tracking = order.get("tracking_events", []) + [
         {"status": "confirmed", "ts": now.isoformat(), "note": "Payment received (card)"},
     ]
@@ -4043,6 +4059,7 @@ async def public_settings():
         "fish_service_price_cents": int(s.get("fish_service_price_cents", 299) or 0),
         "loyalty_earn_points_per_dollar": float(s.get("loyalty_earn_points_per_dollar", 1.0)),
         "loyalty_redeem_points_per_dollar": int(s.get("loyalty_redeem_points_per_dollar", 25)),
+        "loyalty_enabled": bool(s.get("loyalty_enabled", True)),
         # Expose ONLY safe payment-method fields (never secret keys) so the customer app
         # can render the right method list, apply per-method tax, and show Interac email.
         "payment_methods": {

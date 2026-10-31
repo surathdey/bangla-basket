@@ -23,6 +23,7 @@ export default function ShopAccount() {
   const [busy, setBusy] = useState(true);
   const [emailOpen, setEmailOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [loyaltyEnabled, setLoyaltyEnabled] = useState(true);
 
   const copyReferralCode = async () => {
     const code = user?.referral_code || "";
@@ -49,14 +50,16 @@ export default function ShopAccount() {
   const load = useCallback(async () => {
     setBusy(true);
     await refresh();
-    const [c, o, h] = await Promise.all([
+    const [c, o, h, ls] = await Promise.all([
       api.get<{ coupons: Coupon[] }>("/me/coupons"),
       api.get<Order[]>("/orders"),
       api.get<{ entries: Ledger[] }>("/me/points-history"),
+      api.get<{ loyalty_enabled?: boolean }>("/settings"),
     ]);
     if (c.ok) setCoupons(c.data.coupons || []);
     if (o.ok) setOrders(o.data || []);
     if (h.ok) setHistory(h.data.entries || []);
+    if (ls.ok) setLoyaltyEnabled(ls.data?.loyalty_enabled !== false);
     setBusy(false);
   }, [refresh]);
 
@@ -94,10 +97,12 @@ export default function ShopAccount() {
             <Text style={styles.name}>{user!.name || user!.email.split("@")[0]}</Text>
             <Text style={styles.email}>{user!.email}</Text>
           </View>
+          {loyaltyEnabled && (
           <View style={styles.pointsBadge}>
             <Text style={styles.pointsNum}>{user!.loyalty_points}</Text>
             <Text style={styles.pointsLabel}>points</Text>
           </View>
+          )}
         </View>
 
         {/* Refer a friend */}
@@ -174,7 +179,7 @@ export default function ShopAccount() {
             <TouchableOpacity key={o.order_id} style={styles.orderCard} testID={`order-${o.order_id}`} onPress={() => router.push(`/shop/order/${o.order_id}`)}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.orderId}>#{o.order_id.slice(-6).toUpperCase()}</Text>
-                <Text style={styles.orderMeta}>{new Date(o.created_at).toLocaleDateString()} · {o.status}{o.points_awarded ? ` · +${o.points_awarded} pts` : ""}</Text>
+                <Text style={styles.orderMeta}>{new Date(o.created_at).toLocaleDateString()} · {o.status}{(loyaltyEnabled && o.points_awarded) ? ` · +${o.points_awarded} pts` : ""}</Text>
               </View>
               <Text style={styles.orderTotal}>{centsToCAD(o.total_cents)}</Text>
               <TouchableOpacity testID={`reorder-${o.order_id}`} style={styles.reorderBtn} onPress={() => router.push(`/shop/order/${o.order_id}`)}>

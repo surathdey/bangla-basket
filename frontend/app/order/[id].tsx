@@ -86,10 +86,13 @@ export default function OrderScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [polling, setPolling] = useState(false);
+  const [loyaltyEnabled, setLoyaltyEnabled] = useState(true);
 
   const load = useCallback(async () => {
     const r = await api.get<Order>(`/orders/${id}`);
     if (r.ok) setOrder(r.data);
+    const s = await api.get<{ loyalty_enabled?: boolean }>("/settings");
+    if (s.ok) setLoyaltyEnabled(s.data?.loyalty_enabled !== false);
     setLoading(false);
   }, [id]);
 
@@ -421,10 +424,10 @@ export default function OrderScreen() {
             <Row label="Delivery" value={centsToCAD(order.delivery_fee_cents)} />
             {order.discount_cents > 0 && <Row label={`Coupon ${order.coupon_code || ""}`} value={`-${centsToCAD(order.discount_cents)}`} color={colors.success} />}
             {order.referral_discount_cents > 0 && <Row label={`Referral ${order.referral_code || ""}`} value={`-${centsToCAD(order.referral_discount_cents)}`} color={colors.success} />}
-            {order.points_redeemed_cents > 0 && <Row label="Points redeemed" value={`-${centsToCAD(order.points_redeemed_cents)}`} color={colors.success} />}
+            {loyaltyEnabled && order.points_redeemed_cents > 0 && <Row label="Points redeemed" value={`-${centsToCAD(order.points_redeemed_cents)}`} color={colors.success} />}
             <View style={styles.hr} />
             <Row label="Total" value={centsToCAD(order.total_cents)} bold />
-            {order.points_awarded > 0 && <Text style={styles.pointsAwarded}>🎉 +{order.points_awarded} loyalty points earned</Text>}
+            {loyaltyEnabled && order.points_awarded > 0 && <Text style={styles.pointsAwarded}>🎉 +{order.points_awarded} loyalty points earned</Text>}
           </View>
         </View>
 

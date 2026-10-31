@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert, Platform,
 } from "react-native";
@@ -17,6 +17,13 @@ export default function ProfileTab() {
   const { clear: clearCart } = useCart();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const [loyaltyEnabled, setLoyaltyEnabled] = useState(true);
+  useEffect(() => {
+    (async () => {
+      const r = await api.get<{ loyalty_enabled?: boolean }>("/settings");
+      if (r.ok) setLoyaltyEnabled(r.data?.loyalty_enabled !== false);
+    })();
+  }, []);
 
   const enablePush = async () => {
     if (Platform.OS === "web") { Alert.alert("Not available", "Push works on device builds only."); return; }
@@ -103,6 +110,7 @@ export default function ProfileTab() {
         </SafeAreaView>
 
         <View style={styles.section}>
+          {loyaltyEnabled && (
           <View style={styles.loyaltyCard} testID="loyalty-card">
             <View style={styles.loyaltyHead}>
               <Text style={styles.loyaltyLabel}>LOYALTY BALANCE</Text>
@@ -113,6 +121,7 @@ export default function ProfileTab() {
               Earn 1 point per $1 spent. Redeem 100 points = $1 off future orders.
             </Text>
           </View>
+          )}
         </View>
 
         <View style={styles.section}>

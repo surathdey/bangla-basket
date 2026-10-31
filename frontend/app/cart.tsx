@@ -41,7 +41,7 @@ type Quote = {
   referral_discount_cents?: number; referral_error?: string | null;
   delivery_error?: string | null;
   points_redeemed_cents: number; total_cents: number; coupon_code: string | null; points_available: number;
-  coupon_error?: string | null; auto_applied_coupon?: boolean; points_redeem_rate?: number; points_earn_preview?: number;
+  coupon_error?: string | null; auto_applied_coupon?: boolean; points_redeem_rate?: number; points_earn_preview?: number; loyalty_enabled?: boolean;
   points_notice?: string | null; points_consumed?: number;
   tax_cents?: number; tax_label?: string; tax_enabled?: boolean;
   delivery_distance_km?: number | null; delivery_fee_tier?: string;
@@ -700,7 +700,7 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
                 {!!referralCode && quote?.referral_error && (
                   <Text style={styles.couponErr}>{quote.referral_error}</Text>
                 )}
-                {user && user.role !== "guest" ? (
+                {quote?.loyalty_enabled !== false && (user && user.role !== "guest" ? (
                   <>
                     <View style={styles.pointsRow}>
                       <Text style={styles.pointsLabel}>Redeem points (avail: {user?.loyalty_points || 0}{quote?.points_redeem_rate ? ` · ${quote.points_redeem_rate} pts = $1` : ""})</Text>
@@ -725,7 +725,7 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
                   </>
                 ) : (
                   <Text style={styles.earnHint}>Sign in to earn & redeem loyalty points on your orders.</Text>
-                )}
+                ))}
               </View>
 
               <View style={styles.section}>
