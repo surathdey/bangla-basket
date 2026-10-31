@@ -25,7 +25,7 @@ const MUTE = "#6B7280";
 const VEG = "#1A8917";
 const NONVEG = "#B3402F";
 
-const HERO_BANNER = "/api/files/bongconnekt/banners/hero-meal.png";
+const HERO_BANNER = "/api/uploads/banners/hero-meal.jpg";
 
 /** Human label for the current week ("Week of Mon, Oct 3") derived from the
  *  live date so it never goes stale, independent of the admin menu title. */
