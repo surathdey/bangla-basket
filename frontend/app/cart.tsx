@@ -803,7 +803,7 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
 
         {items.length > 0 && (
           <View style={[styles.checkoutBar, { paddingBottom: insets.bottom + 12, pointerEvents: "box-none" }]}>
-            <View style={{ flex: 1, pointerEvents: "none" }}>
+            <View style={{ flexShrink: 0, pointerEvents: "none" }}>
               <Text style={styles.checkoutHint}>Total</Text>
               <Text style={styles.checkoutTotal}>{centsToCAD(quote?.total_cents ?? subtotalCents)}</Text>
             </View>
@@ -888,7 +888,7 @@ const styles = StyleSheet.create({
   noSlotBox: { flexDirection: "row", alignItems: "center", gap: 8, padding: spacing.md, backgroundColor: "#FEF3C7", borderRadius: radius.md, borderWidth: 1, borderColor: "#FDE68A" },
   noSlotText: { flex: 1, color: "#7C4A03", fontSize: 12, fontWeight: "600" },
 
-  input: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: 12, color: colors.text, fontSize: 14 },
+  input: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: 12, color: colors.text, fontSize: 16 },
   helperTxt: { color: colors.textMuted, fontSize: 11, fontStyle: "italic" },
 
   itemMeta: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
@@ -964,9 +964,9 @@ const styles = StyleSheet.create({
   },
   interacModalBtnText: { color: "#fff", fontWeight: "800", fontSize: 14 },
 
-  checkoutBar: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: colors.surface, padding: spacing.lg, borderTopWidth: 1, borderTopColor: colors.border, flexDirection: "row", alignItems: "center", gap: spacing.md, ...shadows.card },
+  checkoutBar: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: colors.surface, paddingVertical: spacing.lg, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: colors.border, flexDirection: "row", alignItems: "center", gap: 8, ...shadows.card },
   checkoutHint: { color: colors.textMuted, fontSize: 11, letterSpacing: 2, fontWeight: "800" },
-  checkoutTotal: { fontSize: 22, fontWeight: "800", color: colors.text },
-  checkoutBtn: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.primary, paddingHorizontal: 20, paddingVertical: 14, borderRadius: radius.pill, ...shadows.card },
-  checkoutBtnText: { color: "#fff", fontSize: 15, fontWeight: "800" },
+  checkoutTotal: { fontSize: 18, fontWeight: "800", color: colors.text },
+  checkoutBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 14, borderRadius: radius.pill, ...shadows.card },
+  checkoutBtnText: { color: "#fff", fontSize: 13, fontWeight: "800", textAlign: "center" },
 });

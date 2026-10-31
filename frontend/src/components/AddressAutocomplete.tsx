@@ -57,6 +57,7 @@ export function AddressAutocomplete({
   const [focused, setFocused] = useState(false);
   const [suppressNextFetch, setSuppressNextFetch] = useState(false);
   const sessionRef = useRef<string>(newSessionToken());
+  const inputRef = useRef<TextInput>(null);
   const debounceRef = useRef<any>(null);
   const lastQueryRef = useRef<string>("");
 
@@ -85,6 +86,9 @@ export function AddressAutocomplete({
 
   const pick = async (p: Prediction) => {
     // Fill the input with a nice human string right away for instant feedback.
+    // Blur the input: on iOS, leaving it focused after a tap keeps Safari's
+    // focus-zoom stuck (page looks zoomed-out / off-screen until pinched back).
+    inputRef.current?.blur();
     onChangeText(p.description);
     setOpen(false);
     setPredictions([]);
@@ -114,6 +118,7 @@ export function AddressAutocomplete({
       <View style={styles.inputWrap}>
         <Ionicons name="location-outline" size={16} color={colors.textMuted} style={{ marginLeft: 10 }} />
         <TextInput
+          ref={inputRef}
           testID={testID}
           value={value}
           onChangeText={onChangeText}
@@ -170,7 +175,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: Platform.OS === "ios" ? 12 : 10,
     color: colors.text,
-    fontSize: 14,
+    // 16px minimum: iOS Safari auto-zooms any smaller input on focus and
+    // often never restores the viewport after a suggestion tap.
+    fontSize: 16,
   },
   dropdown: {
     position: "absolute",
