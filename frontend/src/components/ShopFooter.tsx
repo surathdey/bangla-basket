@@ -10,10 +10,10 @@ const BLUE = "#1E5AA8";
 const INK = "#1F2D45";
 const MUTE = "#6B7280";
 
-// Placeholder business details — the owner can replace these later.
-const CONTACT = { email: BRAND.support?.email || "hello@banglabasket.ca", phone: "+1 (647) 000-0000" };
+// Business details shown in the storefront footer.
+const CONTACT = { email: BRAND.support?.email || "hello@banglabasket.ca", phone: "+1 365-397-9453" };
 const HOURS = ["Mon – Fri: 9:00 AM – 8:00 PM", "Saturday: 9:00 AM – 6:00 PM", "Sunday: 10:00 AM – 4:00 PM"];
-const ADDRESS = ["Bangla Basket Fulfilment", "123 Example Rd, Unit 4", "Milton, ON L9T 0A0, Canada"];
+const ADDRESS = ["Bangla Basket Fulfilment centre @ Mississauga", "3050 Confederation Parkway, Mississauga, ON L5B 3Z6"];
 
 /** One shared, content-rich storefront footer used on every /shop page. */
 export function ShopFooter() {

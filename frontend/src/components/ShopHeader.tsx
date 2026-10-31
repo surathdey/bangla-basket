@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, useWindowDimensions, Platform } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, useWindowDimensions, Platform, Alert } from "react-native";
 import { Image } from "expo-image";
 import Ionicons from "@react-native-vector-icons/ionicons";
 import { useRouter } from "expo-router";
@@ -20,7 +20,7 @@ const INK = "#1F2D45";
 
 const CIRCLE_LOGO = require("@/assets/brand/logo-circle.png");
 
-export type ShopNavKey = "home" | "groceries" | "meal-plans" | "about" | "delivery";
+export type ShopNavKey = "home" | "groceries" | "spices" | "frozen-food" | "meal-plans" | "about" | "delivery";
 
 /** Logo in a filled white circle — the solid background + border means there's
  *  never an "empty circle" flash while the bitmap decodes (fixes BUG-BB-003). */
@@ -80,6 +80,8 @@ export function ShopHeader({ active, navHandlers, showAnnounce = true }: Props) 
   const nav: { key: ShopNavKey; label: string; onPress: () => void }[] = [
     { key: "home", label: "Home", onPress: navHandlers?.home || (() => router.push("/shop")) },
     { key: "groceries", label: "Groceries", onPress: () => router.push("/shop/browse") },
+    { key: "spices", label: "Spices", onPress: () => Alert.alert("Coming Soon", "Spices are coming soon to Bangla Basket.") },
+    { key: "frozen-food", label: "Frozen Food", onPress: () => Alert.alert("Coming Soon", "Frozen food is coming soon to Bangla Basket.") },
     { key: "meal-plans", label: "Meal Plans", onPress: () => router.push("/shop/meal-plans") },
     { key: "about", label: "About Us", onPress: navHandlers?.about || (() => router.push({ pathname: "/shop", params: { section: "about" } })) },
     { key: "delivery", label: "Delivery", onPress: navHandlers?.delivery || (() => router.push({ pathname: "/shop", params: { section: "delivery" } })) },
