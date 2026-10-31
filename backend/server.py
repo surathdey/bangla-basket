@@ -6171,11 +6171,17 @@ def _public_base_from_request(request: Request, client_base_url: Optional[str] =
 
 
 def _order_base(order: dict) -> str:
-    """Absolute base origin stored on the order (falls back to env)."""
+    """Absolute base origin for invoice/track links. The canonical env
+    domain wins over the origin stored on the order, so links never point
+    at a test/dev entry point (e.g. an IP:port) after cutover. Falls back
+    to the stored origin, then env, when no canonical domain is set."""
+    env = (os.environ.get("PUBLIC_BASE_URL", "") or "").rstrip("/")
+    if env:
+        return env
     base = (order or {}).get("public_base_url") or ""
     if base:
         return base.rstrip("/")
-    return (os.environ.get("PUBLIC_BASE_URL", "") or os.environ.get("EXPO_PUBLIC_BACKEND_URL", "")).rstrip("/")
+    return (os.environ.get("EXPO_PUBLIC_BACKEND_URL", "") or "").rstrip("/")
 
 
 def _invoice_link(order: dict) -> str:
