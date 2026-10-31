@@ -2357,6 +2357,8 @@ async def _resolve_coupon(code: Optional[str], subtotal: int, user: User, snapsh
     all_except_weekly_meal restrict the base to the matching snapshot lines."""
     if not code:
         return 0, None, None
+    if getattr(user, "role", None) == "guest":
+        return 0, None, "Login is required to apply the coupon code."
     c = await db.coupons.find_one({"code": code.strip().upper()}, {"_id": 0})
     if not c or not c.get("active", True):
         return 0, None, "Invalid or inactive coupon code."
