@@ -222,7 +222,7 @@ export default function ShopHome() {
             <View style={styles.sectionHead}>
               <View>
                 <Text style={styles.kicker}>ORDER ANY TIME</Text>
-                <Text style={styles.sectionTitle}>Always Available</Text>
+                <Text style={styles.sectionTitle}>Available Along With Weekly Menu</Text>
               </View>
               <TouchableOpacity testID="shop-anytime-mealplans" onPress={goMealPlans}><Text style={styles.seeAll}>Meal plans →</Text></TouchableOpacity>
             </View>

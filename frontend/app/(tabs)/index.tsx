@@ -297,7 +297,7 @@ export default function HomeScreen() {
         {anytime.length > 0 && (
           <View style={styles.section} testID="home-anytime">
             <View style={styles.sectionHead}>
-              <Text style={styles.sectionTitle}>Always Available</Text>
+              <Text style={styles.sectionTitle}>Available Along With Weekly Menu</Text>
               <TouchableOpacity testID="home-anytime-viewmenu" onPress={() => router.push("/(tabs)/menu")}>
                 <Text style={styles.sectionLink}>See menu →</Text>
               </TouchableOpacity>

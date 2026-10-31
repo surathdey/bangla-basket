@@ -288,7 +288,7 @@ function AnytimeSection({ items, onAdd }: { items: MenuItem[]; onAdd: (it: MenuI
     <View style={styles.anytimeWrap} testID="menu-anytime">
       <View style={styles.anytimeHead}>
         <Ionicons name="time-outline" size={16} color={colors.primary} />
-        <Text style={styles.anytimeTitle}>Always Available</Text>
+        <Text style={styles.anytimeTitle}>Available Along With Weekly Menu</Text>
       </View>
       <Text style={styles.anytimeSub}>Order any time — biryani, rolls, breads &amp; more.</Text>
       {items.map(it => (

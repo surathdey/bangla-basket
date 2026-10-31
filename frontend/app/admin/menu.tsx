@@ -623,7 +623,7 @@ export default function AdminMenu() {
                 <View style={{ gap: spacing.md }}>
                   <View style={styles.modeCard}>
                     <Text style={styles.modeTitle}>Always Available (global)</Text>
-                    <Text style={styles.modeHint}>One global list, shown on every week under &ldquo;Always Available&rdquo; on the customer home &amp; menu. Pick dishes from the Master Menu — changes go live instantly.</Text>
+                    <Text style={styles.modeHint}>One global list, shown on every week under &ldquo;Available Along With Weekly Menu&rdquo; on the customer home &amp; menu. Pick dishes from the Master Menu — changes go live instantly.</Text>
                   </View>
                   <MasterMultiSelect
                     testIDPrefix="always"
