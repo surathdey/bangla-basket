@@ -31,9 +31,9 @@ export function ShopFooter() {
   return (
     <View style={styles.footer} testID="shop-footer">
       <View style={[styles.inner, { width: contentWidth }]}>
-        <View style={[styles.cols, isNarrow && { flexDirection: "column", gap: spacing.xl }]}>
+        <View style={[styles.cols, isNarrow && styles.colsNarrow]}>
           {/* Brand */}
-          <View style={styles.brandCol}>
+          <View style={isNarrow ? styles.brandColNarrow : styles.brandCol}>
             <ShopLogo size={56} border={4} />
             <Text style={styles.brandName}>{BRAND.name}</Text>
             <Text style={styles.tagline}>Your neighbourhood halal grocery & weekly meal plans — fresh, delivered across {BRAND.region.serviceArea}.</Text>
@@ -48,7 +48,7 @@ export function ShopFooter() {
           </View>
 
           {/* Contact */}
-          <View style={styles.col}>
+          <View style={isNarrow ? styles.colNarrow : styles.col}>
             <Text style={styles.colHead}>Contact</Text>
             <TouchableOpacity style={styles.row} onPress={() => {}}>
               <Ionicons name="mail-outline" size={14} color={BLUE} />
@@ -61,7 +61,7 @@ export function ShopFooter() {
           </View>
 
           {/* Hours */}
-          <View style={styles.col}>
+          <View style={isNarrow ? styles.colNarrow : styles.col}>
             <Text style={styles.colHead}>Business Hours</Text>
             {HOURS.map(h => (
               <View key={h} style={styles.row}>
@@ -72,7 +72,7 @@ export function ShopFooter() {
           </View>
 
           {/* Address */}
-          <View style={styles.col}>
+          <View style={isNarrow ? styles.colNarrow : styles.col}>
             <Text style={styles.colHead}>Address</Text>
             <View style={styles.row}>
               <Ionicons name="location-outline" size={14} color={BLUE} style={{ marginTop: 2 }} />
@@ -96,13 +96,18 @@ const styles = StyleSheet.create({
   footer: { backgroundColor: "#fff", borderTopWidth: 1, borderTopColor: "#F0E6D8", alignItems: "center", paddingVertical: spacing.xl, marginTop: spacing.xl },
   inner: { paddingHorizontal: spacing.lg, gap: spacing.lg },
   cols: { flexDirection: "row", justifyContent: "space-between", gap: spacing.xl, flexWrap: "wrap" },
+  // Mobile: plain full-width blocks, no flex sizing — the old flex+wrap row
+  // collapsed on phones so the Contact heading overlapped the links row.
+  colsNarrow: { flexDirection: "column", flexWrap: "nowrap", gap: spacing.xl },
   brandCol: { flex: 1.4, minWidth: 240, gap: 6 },
+  brandColNarrow: { width: "100%", gap: 6 },
   brandName: { fontSize: 19, fontWeight: "900", color: INK, marginTop: 6 },
   tagline: { fontSize: 13, color: MUTE, lineHeight: 19, maxWidth: 360 },
   linkRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" },
   link: { color: BLUE, fontWeight: "700", fontSize: 13 },
   dot: { color: MUTE },
   col: { flex: 1, minWidth: 170, gap: 8 },
+  colNarrow: { width: "100%", gap: 8 },
   colHead: { fontSize: 11, fontWeight: "900", letterSpacing: 1.5, color: INK, marginBottom: 2 },
   row: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
   rowText: { fontSize: 13, color: MUTE, lineHeight: 19, flexShrink: 1 },

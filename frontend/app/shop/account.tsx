@@ -7,19 +7,44 @@ import { useAuth } from "@/src/auth";
 import { api } from "@/src/api";
 import { colors, spacing, radius, shadows } from "@/src/theme";
 import { centsToCAD } from "@/src/utils/format";
+import { EmailAuthModal } from "@/src/components/EmailAuthModal";
 
 type Coupon = { code: string; value: number; discount_type: string; description: string; expiry?: string | null; expired?: boolean; used?: boolean; personal?: boolean };
 type Order = { order_id: string; total_cents: number; status: string; created_at: string; points_awarded?: number; items_snapshot?: any[] };
 type Ledger = { delta: number; type: string; note: string; ts: string };
 
 export default function ShopAccount() {
-  const { user, loading, signOut, refresh } = useAuth();
+  const { user, loading, signIn, signOut, refresh } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [history, setHistory] = useState<Ledger[]>([]);
   const [busy, setBusy] = useState(true);
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const copyReferralCode = async () => {
+    const code = user?.referral_code || "";
+    if (!code) return;
+    try {
+      const nav = (typeof navigator !== "undefined" ? (navigator as any) : null);
+      if (nav?.clipboard?.writeText) {
+        await nav.clipboard.writeText(code);
+      } else if (typeof document !== "undefined") {
+        const ta = document.createElement("textarea");
+        ta.value = code;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      } else {
+        return;
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {}
+  };
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -45,8 +70,11 @@ export default function ShopAccount() {
       <View style={[styles.center, { padding: spacing.xl }]}>
         <Ionicons name="person-circle-outline" size={56} color={colors.textMuted} />
         <Text style={styles.emptyTitle}>You're not signed in</Text>
-        <Text style={styles.emptyHint}>Sign in from the storefront to see your account.</Text>
+        <Text style={styles.emptyHint}>Sign in to see your referral code, coupons and orders.</Text>
+        <TouchableOpacity testID="account-google-login" style={styles.primaryBtn} onPress={() => signIn()}><Text style={styles.primaryBtnText}>Continue with Google</Text></TouchableOpacity>
+        <TouchableOpacity testID="account-email-login" style={styles.secondaryBtn} onPress={() => setEmailOpen(true)}><Text style={styles.secondaryBtnText}>Login with Email</Text></TouchableOpacity>
         <TouchableOpacity style={styles.primaryBtn} onPress={() => router.push("/shop")}><Text style={styles.primaryBtnText}>Back to shop</Text></TouchableOpacity>
+        <EmailAuthModal visible={emailOpen} onClose={() => setEmailOpen(false)} onSuccess={() => { setEmailOpen(false); load(); }} />
       </View>
     );
   }
@@ -70,6 +98,23 @@ export default function ShopAccount() {
             <Text style={styles.pointsNum}>{user!.loyalty_points}</Text>
             <Text style={styles.pointsLabel}>points</Text>
           </View>
+        </View>
+
+        {/* Refer a friend */}
+        <Text style={styles.section}>Refer a friend</Text>
+        <View style={styles.referCard} testID="account-referral">
+          <Text style={styles.referDesc}>Share your code — your friend gets 10% off groceries, and you get a 10% grocery coupon when their order is confirmed. One reward per friend.</Text>
+          {user!.referral_code ? (
+            <View style={styles.referCodeRow}>
+              <Text style={styles.referCode} testID="account-referral-code">{user!.referral_code}</Text>
+              <TouchableOpacity testID="account-referral-copy" style={styles.copyBtn} onPress={copyReferralCode}>
+                <Ionicons name={copied ? "checkmark" : "copy-outline"} size={16} color="#fff" />
+                <Text style={styles.copyBtnText}>{copied ? "Copied!" : "Copy"}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <Text style={styles.muted}>Your referral code will appear here after you sign in again.</Text>
+          )}
         </View>
 
         {/* Saved address */}
@@ -176,4 +221,12 @@ const styles = StyleSheet.create({
   ledgerDelta: { fontSize: 14, fontWeight: "800" },
   primaryBtn: { backgroundColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 24, height: 48, alignItems: "center", justifyContent: "center", marginTop: 10 },
   primaryBtnText: { color: "#fff", fontWeight: "800", fontSize: 15 },
+  secondaryBtn: { backgroundColor: colors.surfaceAlt, borderRadius: radius.pill, paddingHorizontal: 24, height: 48, alignItems: "center", justifyContent: "center", marginTop: 10, borderWidth: 1, borderColor: colors.border },
+  secondaryBtnText: { color: colors.text, fontWeight: "800", fontSize: 15 },
+  referCard: { backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border, gap: 10 },
+  referDesc: { fontSize: 13.5, color: colors.textMuted, lineHeight: 19 },
+  referCodeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, backgroundColor: colors.surfaceAlt, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: 10 },
+  referCode: { fontSize: 20, fontWeight: "900", letterSpacing: 2, color: colors.text },
+  copyBtn: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 16, height: 40 },
+  copyBtnText: { color: "#fff", fontWeight: "800", fontSize: 14 },
 });

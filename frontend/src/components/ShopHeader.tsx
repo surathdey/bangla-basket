@@ -5,6 +5,7 @@ import Ionicons from "@react-native-vector-icons/ionicons";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@/src/api";
+import { useAuth } from "@/src/auth";
 import { useCart } from "@/src/cart";
 import { BRAND } from "@/src/brand";
 import { spacing, radius, shadows } from "@/src/theme";
@@ -51,6 +52,8 @@ export function ShopHeader({ active, navHandlers, showAnnounce = true }: Props) 
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { count } = useCart();
+  const { user } = useAuth();
+  const loggedIn = !!user && user.role !== "guest";
   const isNarrow = width < 900;
   const contentWidth = Math.min(width, 1200);
 
@@ -74,8 +77,8 @@ export function ShopHeader({ active, navHandlers, showAnnounce = true }: Props) 
     { key: "home", label: "Home", onPress: navHandlers?.home || (() => router.push("/shop")) },
     { key: "groceries", label: "Groceries", onPress: () => router.push("/shop/browse") },
     { key: "meal-plans", label: "Meal Plans", onPress: () => router.push("/shop/meal-plans") },
-    { key: "about", label: "About Us", onPress: navHandlers?.about || (() => router.push("/shop")) },
-    { key: "delivery", label: "Delivery", onPress: navHandlers?.delivery || (() => router.push("/shop")) },
+    { key: "about", label: "About Us", onPress: navHandlers?.about || (() => router.push({ pathname: "/shop", params: { section: "about" } })) },
+    { key: "delivery", label: "Delivery", onPress: navHandlers?.delivery || (() => router.push({ pathname: "/shop", params: { section: "delivery" } })) },
   ];
 
   return (
@@ -106,10 +109,12 @@ export function ShopHeader({ active, navHandlers, showAnnounce = true }: Props) 
 
           <View style={styles.navRight}>
             <ShopAccountButton compact={isNarrow} />
-            <TouchableOpacity testID="home-open-app" style={styles.navGhost} onPress={() => router.push("/(tabs)")}>
-              <Ionicons name="phone-portrait-outline" size={16} color={INK} />
-              {!isNarrow && <Text style={styles.navGhostText}>App</Text>}
-            </TouchableOpacity>
+            {loggedIn && (
+              <TouchableOpacity testID="shop-refer-btn" style={styles.navGhost} onPress={() => router.push("/shop/account")}>
+                <Ionicons name="gift-outline" size={16} color={INK} />
+                {!isNarrow && <Text style={styles.navGhostText}>Refer friend</Text>}
+              </TouchableOpacity>
+            )}
             <TouchableOpacity testID="home-cart-btn" style={styles.cartBtn} onPress={() => router.push("/shop/cart")}>
               <Ionicons name="cart" size={18} color="#fff" />
               {!isNarrow && <Text style={styles.cartBtnText}>Cart</Text>}

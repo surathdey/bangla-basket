@@ -17,6 +17,7 @@ export type CurrentUser = {
   loyalty_points: number;
   role: string;
   default_address?: any;
+  referral_code?: string;
 };
 
 type AuthState = {

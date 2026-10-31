@@ -6,7 +6,7 @@ import {
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import Ionicons from "@react-native-vector-icons/ionicons";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCart } from "@/src/cart";
 import { api } from "@/src/api";
@@ -59,6 +59,7 @@ export default function ShopHome() {
   const scrollRef = useRef<ScrollView>(null);
   const aboutY = useRef(0);
   const deliveryY = useRef(0);
+  const params = useLocalSearchParams<{ section?: string }>();
 
   useEffect(() => {
     (async () => {
@@ -77,6 +78,19 @@ export default function ShopHome() {
 
   const scrollTo = (y: number) => scrollRef.current?.scrollTo({ y: Math.max(0, y - 70), animated: true });
 
+  // Scroll to a section, retrying once if layout hasn't been measured yet.
+  const scrollToSection = (ref: React.MutableRefObject<number>) => {
+    if (ref.current > 0) scrollTo(ref.current);
+    else setTimeout(() => { if (ref.current > 0) scrollTo(ref.current); }, 400);
+  };
+
+  // Arriving from another shop page via ?section=about|delivery: scroll to it.
+  useEffect(() => {
+    if (params.section === "about") scrollToSection(aboutY);
+    else if (params.section === "delivery") scrollToSection(deliveryY);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.section]);
+
   const onAddFeatured = (g: Grocery) => {
     if (g.has_variants) { router.push(`/shop/product/${g.item_id}`); return; }
     add({ kind: "grocery" as any, ref_id: g.item_id, name: g.title, price_cents: g.price_cents, image_url: g.image_url, category: g.category, subcategory: (g as any).subcategory });
@@ -91,8 +105,8 @@ export default function ShopHome() {
         active="home"
         navHandlers={{
           home: () => scrollRef.current?.scrollTo({ y: 0, animated: true }),
-          about: () => scrollTo(aboutY.current),
-          delivery: () => scrollTo(deliveryY.current),
+          about: () => scrollToSection(aboutY),
+          delivery: () => scrollToSection(deliveryY),
         }}
       />
 
@@ -117,6 +131,10 @@ export default function ShopHome() {
                   </TouchableOpacity>
                   <TouchableOpacity testID="hero-mealplans" style={styles.ctaGhost} onPress={goMealPlans}>
                     <Text style={styles.ctaGhostText}>Explore Meal Plans</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity testID="hero-invite-friend" style={styles.ctaInvite} onPress={() => router.push("/shop/account")}>
+                    <Ionicons name="gift-outline" size={18} color="#1F2D45" />
+                    <Text style={styles.ctaInviteText}>Invite friend</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -329,6 +347,8 @@ const styles = StyleSheet.create({
   ctaPrimaryText: { color: "#fff", fontWeight: "900", fontSize: 16 },
   ctaGhost: { flexDirection: "row", alignItems: "center", paddingHorizontal: 24, height: 54, borderRadius: radius.pill, borderWidth: 2, borderColor: "#fff", backgroundColor: "rgba(255,255,255,0.12)" },
   ctaGhostText: { color: "#fff", fontWeight: "800", fontSize: 15 },
+  ctaInvite: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: GOLD, paddingHorizontal: 26, height: 54, borderRadius: radius.pill, ...shadows.card },
+  ctaInviteText: { color: "#1F2D45", fontWeight: "900", fontSize: 16 },
 
   quickRow: { gap: 8, paddingHorizontal: spacing.lg, paddingVertical: 14 },
   quickChip: { flexShrink: 0, paddingHorizontal: 16, height: 38, borderRadius: radius.pill, backgroundColor: CREAM, borderWidth: 1, borderColor: "#EBDFCE", alignItems: "center", justifyContent: "center" },
