@@ -22,7 +22,7 @@ import { ShopFooter } from "@/src/components/ShopFooter";
 import { FishSubcatNote } from "@/src/components/FishSubcatNote";
 import type { Grocery } from "../(tabs)/groceries";
 
-const HERO_GROCERY = "/api/files/bongconnekt/banners/hero-grocery.png";
+const HERO_GROCERY = "/api/uploads/banners/hero-grocery.jpg";
 const BLUE = "#1E5AA8";
 type Cat = { category: string; count: number };
 
