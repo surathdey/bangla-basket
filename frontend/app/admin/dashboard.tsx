@@ -192,7 +192,7 @@ export default function AdminDashboard() {
                   <ScrollView horizontal testID="dash-table">
                     <View>
                       <View style={[styles.row, styles.headerRow]}>
-                        {["Date", "Order", "Customer", "Items", "Subtotal", "Delivery", "Coupon", "Discount", "Tax", "Total", "Pay", "Status"].map(h => (
+                        {["Date", "Order", "Customer", "Items", "Subtotal", "Delivery", "Coupon", "Discount", "Referral", "Ref. discount", "Tax", "Total", "Pay", "Status"].map(h => (
                           <Text key={h} style={[styles.cell, styles.headerCell, h === "Customer" ? styles.wideCell : null]}>{h}</Text>
                         ))}
                       </View>
@@ -208,6 +208,8 @@ export default function AdminDashboard() {
                           <Text style={styles.cell}>{money(o.delivery_fee_cents)}</Text>
                           <Text style={styles.cell}>{o.coupon_code || "—"}</Text>
                           <Text style={styles.cell}>{money(o.discount_cents)}</Text>
+                          <Text style={styles.cell}>{o.referral_code || "—"}</Text>
+                          <Text style={styles.cell}>{o.referral_code ? money(o.referral_discount_cents || 0) : "—"}</Text>
                           <Text style={styles.cell}>{money(o.tax_cents || 0)}</Text>
                           <Text style={[styles.cell, styles.boldCell]}>{money(o.total_cents)}</Text>
                           <Text style={styles.cell}>{o.payment_method}</Text>
