@@ -673,7 +673,7 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Coupon & rewards</Text>
                 <View style={{ flexDirection: "row", gap: spacing.sm, alignItems: "center" }}>
-                  <TextInput testID="cart-coupon" placeholder="Coupon code (e.g. WELCOME10)"
+                  <TextInput testID="cart-coupon" placeholder="Coupon code (e.g. WELCOME20)"
                     placeholderTextColor={colors.textMuted} value={couponCode} onChangeText={t => setCouponCode(t.toUpperCase())}
                     style={[styles.input, { flex: 1 }]} autoCapitalize="characters" />
                   <TouchableOpacity testID="cart-coupon-apply" style={styles.applyBtn} onPress={fetchQuote}>
@@ -775,9 +775,10 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
                       </Text>
                     )}
                     {quote.discount_cents > 0 && <SumRow label={quote.auto_applied_coupon ? "First time discount" : "Coupon discount"} value={`-${centsToCAD(quote.discount_cents)}`} color={colors.success} />}
+                    {quote.referral_discount_cents > 0 && <SumRow label="Referral discount" value={`-${centsToCAD(quote.referral_discount_cents)}`} color={colors.success} />}
                     {quote.points_redeemed_cents > 0 && <SumRow label="Points redeemed" value={`-${centsToCAD(quote.points_redeemed_cents)}`} color={colors.success} />}
                     {!!quote.tax_cents && quote.tax_cents > 0 && (
-                      <SumRow label={`${quote.tax_label || "Tax"} (${((quote.tax_cents / Math.max(1, quote.subtotal_cents + quote.delivery_fee_cents - quote.discount_cents - quote.points_redeemed_cents)) * 100).toFixed(0)}%)`} value={centsToCAD(quote.tax_cents)} />
+                      <SumRow label={`${quote.tax_label || "Tax"} (${((quote.tax_cents / Math.max(1, quote.subtotal_cents + quote.delivery_fee_cents - quote.discount_cents - (quote.referral_discount_cents || 0) - quote.points_redeemed_cents)) * 100).toFixed(0)}%)`} value={centsToCAD(quote.tax_cents)} />
                     )}
                     <View style={styles.hr} />
                     <SumRow label="Total" value={centsToCAD(quote.total_cents)} bold />

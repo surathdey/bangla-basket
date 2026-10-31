@@ -972,6 +972,17 @@ async def _resolve_referral(code: Optional[str], user, snapshots):
         return 0, None, "Invalid referral code."
     if ref["user_id"] == getattr(user, "user_id", None):
         return 0, None, "You can't use your own referral code."
+    # One-time use per (referrer, referred) pair: once this customer has placed
+    # an order with this referrer's code, the code can't be used again by them.
+    # (Other customers can still use the same code — it is not globally dead.)
+    uid = getattr(user, "user_id", None)
+    if uid:
+        prior = await db.orders.find_one(
+            {"user_id": uid, "referrer_user_id": ref["user_id"],
+             "referral_discount_cents": {"$gt": 0}},
+            {"_id": 0, "order_id": 1})
+        if prior:
+            return 0, None, "You have already used this referral code."
     base = sum(int(l.get("line_total_cents", 0) or 0) for l in (snapshots or []) if l.get("kind") == "grocery")
     return base * 10 // 100, ref["user_id"], None
 

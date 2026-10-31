@@ -426,6 +426,7 @@ export default function ShopOrderScreen() {
             <Row label="Subtotal" value={centsToCAD(order.subtotal_cents)} />
             <Row label="Delivery" value={centsToCAD(order.delivery_fee_cents)} />
             {order.discount_cents > 0 && <Row label={`Coupon ${order.coupon_code || ""}`} value={`-${centsToCAD(order.discount_cents)}`} color={colors.success} />}
+            {order.referral_discount_cents > 0 && <Row label={`Referral ${order.referral_code || ""}`} value={`-${centsToCAD(order.referral_discount_cents)}`} color={colors.success} />}
             {order.points_redeemed_cents > 0 && <Row label="Points redeemed" value={`-${centsToCAD(order.points_redeemed_cents)}`} color={colors.success} />}
             <View style={styles.hr} />
             <Row label="Total" value={centsToCAD(order.total_cents)} bold />

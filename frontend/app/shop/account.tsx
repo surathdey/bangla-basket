@@ -10,7 +10,7 @@ import { centsToCAD } from "@/src/utils/format";
 import { EmailAuthModal } from "@/src/components/EmailAuthModal";
 
 type Coupon = { code: string; value: number; discount_type: string; description: string; expiry?: string | null; expired?: boolean; used?: boolean; personal?: boolean };
-type Order = { order_id: string; total_cents: number; status: string; created_at: string; points_awarded?: number; items_snapshot?: any[] };
+type Order = { order_id: string; total_cents: number; status: string; created_at: string; points_awarded?: number; items_snapshot?: any[]; referral_code?: string; referral_discount_cents?: number };
 type Ledger = { delta: number; type: string; note: string; ts: string };
 
 export default function ShopAccount() {
@@ -104,6 +104,14 @@ export default function ShopAccount() {
         <Text style={styles.section}>Refer a friend</Text>
         <View style={styles.referCard} testID="account-referral">
           <Text style={styles.referDesc}>Share your code — your friend gets 10% off groceries, and you get a 10% grocery coupon when their order is confirmed. One reward per friend.</Text>
+          {(() => {
+            const used = orders.find(o => (o.referral_discount_cents || 0) > 0);
+            return used ? (
+              <Text style={styles.referUsed} testID="account-referral-used">
+                ✓ Referral code {used.referral_code || ""} already applied — it can't be used again.
+              </Text>
+            ) : null;
+          })()}
           {user!.referral_code ? (
             <View style={styles.referCodeRow}>
               <Text style={styles.referCode} testID="account-referral-code">{user!.referral_code}</Text>
@@ -225,6 +233,7 @@ const styles = StyleSheet.create({
   secondaryBtnText: { color: colors.text, fontWeight: "800", fontSize: 15 },
   referCard: { backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border, gap: 10 },
   referDesc: { fontSize: 13.5, color: colors.textMuted, lineHeight: 19 },
+  referUsed: { fontSize: 13.5, color: colors.text, fontWeight: "700", lineHeight: 19 },
   referCodeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, backgroundColor: colors.surfaceAlt, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: 10 },
   referCode: { fontSize: 20, fontWeight: "900", letterSpacing: 2, color: colors.text },
   copyBtn: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 16, height: 40 },
