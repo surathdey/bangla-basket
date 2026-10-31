@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, useWindowDimensions, Platform, Alert } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, useWindowDimensions, Platform, Modal } from "react-native";
 import { Image } from "expo-image";
 import Ionicons from "@react-native-vector-icons/ionicons";
 import { useRouter } from "expo-router";
@@ -63,6 +63,7 @@ export function ShopHeader({ active, navHandlers, showAnnounce = true }: Props) 
     enabled: true, text: "Free delivery on orders over $150",
   });
   const [loyaltyEnabled, setLoyaltyEnabled] = useState(true);
+  const [comingSoon, setComingSoon] = useState<{ label: string; msg: string } | null>(null);
   useEffect(() => {
     (async () => {
       const r = await api.get<{ delivery_ribbon_enabled?: boolean; delivery_ribbon_text?: string; loyalty_enabled?: boolean }>("/settings");
@@ -80,8 +81,8 @@ export function ShopHeader({ active, navHandlers, showAnnounce = true }: Props) 
   const nav: { key: ShopNavKey; label: string; onPress: () => void }[] = [
     { key: "home", label: "Home", onPress: navHandlers?.home || (() => router.push("/shop")) },
     { key: "groceries", label: "Groceries", onPress: () => router.push("/shop/browse") },
-    { key: "spices", label: "Spices", onPress: () => Alert.alert("Coming Soon", "Spices are coming soon to Bangla Basket.") },
-    { key: "frozen-food", label: "Frozen Food", onPress: () => Alert.alert("Coming Soon", "Frozen food is coming soon to Bangla Basket.") },
+    { key: "spices", label: "Spices", onPress: () => setComingSoon({ label: "Spices", msg: "Spices are coming soon to Bangla Basket." }) },
+    { key: "frozen-food", label: "Frozen Food", onPress: () => setComingSoon({ label: "Frozen Food", msg: "Frozen food is coming soon to Bangla Basket." }) },
     { key: "meal-plans", label: "Meal Plans", onPress: () => router.push("/shop/meal-plans") },
     { key: "about", label: "About Us", onPress: navHandlers?.about || (() => router.push({ pathname: "/shop", params: { section: "about" } })) },
     { key: "delivery", label: "Delivery", onPress: navHandlers?.delivery || (() => router.push({ pathname: "/shop", params: { section: "delivery" } })) },
@@ -139,6 +140,18 @@ export function ShopHeader({ active, navHandlers, showAnnounce = true }: Props) 
           </ScrollView>
         )}
       </View>
+
+      <Modal visible={comingSoon !== null} transparent animationType="fade" onRequestClose={() => setComingSoon(null)}>
+        <View style={styles.csOverlay} testID="coming-soon-modal">
+          <View style={styles.csCard}>
+            <Text style={styles.csTitle}>COMING SOON</Text>
+            <Text style={styles.csMsg}>{comingSoon?.msg}</Text>
+            <TouchableOpacity testID="coming-soon-close" style={styles.csBtn} onPress={() => setComingSoon(null)}>
+              <Text style={styles.csBtnText}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -169,4 +182,10 @@ const styles = StyleSheet.create({
   navChip: { paddingHorizontal: 14, height: 34, borderRadius: radius.pill, backgroundColor: CREAM, borderWidth: 1, borderColor: "#EBDFCE", alignItems: "center", justifyContent: "center" },
   navChipOn: { backgroundColor: RED, borderColor: RED },
   navChipText: { fontSize: 13, fontWeight: "700", color: INK },
+  csOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center", padding: spacing.lg },
+  csCard: { backgroundColor: "#fff", borderRadius: 16, padding: 24, maxWidth: 360, width: "100%", alignItems: "center", gap: 10 },
+  csTitle: { fontSize: 20, fontWeight: "900", color: INK, letterSpacing: 1 },
+  csMsg: { fontSize: 14, color: INK, textAlign: "center" },
+  csBtn: { backgroundColor: RED, paddingHorizontal: 28, paddingVertical: 10, borderRadius: radius.pill, marginTop: 6 },
+  csBtnText: { color: "#fff", fontSize: 14, fontWeight: "800" },
 });
