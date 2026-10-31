@@ -130,7 +130,20 @@ export function ShopHeader({ active, navHandlers, showAnnounce = true }: Props) 
           </View>
         </View>
 
-        {isNarrow && (
+        {isNarrow && (Platform.OS === "web" ? (
+          // Plain native horizontal scroller on web: the RN ScrollView's JS
+          // responder layer + the sticky, centre-aligned header left this
+          // ribbon stuck mid-scroll on iOS Safari (Home/Delivery unreachable
+          // by finger). A plain overflow-x row is the standard mobile-web
+          // tab-bar pattern and scrolls natively. Native apps keep ScrollView.
+          <View style={styles.navScrollWeb}>
+            {nav.map(n => (
+              <TouchableOpacity key={n.key} testID={`nav-m-${n.label}`} onPress={n.onPress} style={[styles.navChip, active === n.key && styles.navChipOn]}>
+                <Text style={[styles.navChipText, active === n.key && { color: "#fff" }]}>{n.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.navScroll}>
             {nav.map(n => (
               <TouchableOpacity key={n.key} testID={`nav-m-${n.label}`} onPress={n.onPress} style={[styles.navChip, active === n.key && styles.navChipOn]}>
@@ -138,7 +151,7 @@ export function ShopHeader({ active, navHandlers, showAnnounce = true }: Props) 
               </TouchableOpacity>
             ))}
           </ScrollView>
-        )}
+        ))}
       </View>
 
       <Modal visible={comingSoon !== null} transparent animationType="fade" onRequestClose={() => setComingSoon(null)}>
@@ -179,7 +192,15 @@ const styles = StyleSheet.create({
   cartDot: { position: "absolute", top: -4, right: -4, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: GOLD, alignItems: "center", justifyContent: "center", paddingHorizontal: 4 },
   cartDotText: { color: "#1a1a1a", fontSize: 10, fontWeight: "900" },
   navScroll: { gap: 8, paddingHorizontal: spacing.lg, paddingBottom: 10, alignItems: "center" },
-  navChip: { paddingHorizontal: 14, height: 34, borderRadius: radius.pill, backgroundColor: CREAM, borderWidth: 1, borderColor: "#EBDFCE", alignItems: "center", justifyContent: "center" },
+  // Web-only ribbon scroller: full width (never shrink-wrapped by the
+  // centre-aligned header), native momentum scrolling, no scrollbar.
+  navScrollWeb: {
+    flexDirection: "row", gap: 8, alignItems: "center",
+    width: "100%", overflowX: "auto", overflowY: "hidden",
+    paddingHorizontal: spacing.lg, paddingBottom: 10,
+    WebkitOverflowScrolling: "touch", scrollbarWidth: "none",
+  } as any,
+  navChip: { flexShrink: 0, paddingHorizontal: 14, height: 34, borderRadius: radius.pill, backgroundColor: CREAM, borderWidth: 1, borderColor: "#EBDFCE", alignItems: "center", justifyContent: "center" },
   navChipOn: { backgroundColor: RED, borderColor: RED },
   navChipText: { fontSize: 13, fontWeight: "700", color: INK },
   csOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center", padding: spacing.lg },
