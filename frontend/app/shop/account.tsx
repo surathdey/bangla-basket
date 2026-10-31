@@ -125,6 +125,16 @@ export default function ShopAccount() {
           )}
         </View>
 
+        {/* Weekly meal streak */}
+        <Text style={styles.section}>Weekly meal streak</Text>
+        <View style={styles.streakCard} testID="account-streak">
+          <Text style={styles.streakText}>
+            {(user!.weekly_meal_streak || 0) === 0
+              ? "0 of 4 weekly meals — order 4 weekly meals and your 5th is 50% off."
+              : `${Math.min(user!.weekly_meal_streak || 0, 4)} of 4 weekly meals — ${Math.max(0, 4 - (user!.weekly_meal_streak || 0))} more and your 5th is 50% off.`}
+          </Text>
+        </View>
+
         {/* Saved address */}
         <Text style={styles.section}>Saved delivery address</Text>
         {user!.default_address ? (
@@ -234,6 +244,8 @@ const styles = StyleSheet.create({
   referCard: { backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border, gap: 10 },
   referDesc: { fontSize: 13.5, color: colors.textMuted, lineHeight: 19 },
   referUsed: { fontSize: 13.5, color: colors.text, fontWeight: "700", lineHeight: 19 },
+  streakCard: { backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border },
+  streakText: { fontSize: 13.5, color: colors.text, fontWeight: "700", lineHeight: 19 },
   referCodeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, backgroundColor: colors.surfaceAlt, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: 10 },
   referCode: { fontSize: 20, fontWeight: "900", letterSpacing: 2, color: colors.text },
   copyBtn: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 16, height: 40 },

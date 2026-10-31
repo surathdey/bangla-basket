@@ -18,6 +18,7 @@ export type CurrentUser = {
   role: string;
   default_address?: any;
   referral_code?: string;
+  weekly_meal_streak?: number;
 };
 
 type AuthState = {
