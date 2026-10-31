@@ -10,8 +10,17 @@ export default function Index() {
 
   useEffect(() => {
     if (loading) return;
-    if (user) router.replace("/(tabs)");
-    else router.replace("/login");
+    if (user) {
+      // After a web Google login, Emergent returns to "/" — send shop visitors
+      // back to the shop page they came from instead of the app tabs.
+      let dest: any = "/(tabs)";
+      try {
+        const ret = typeof window !== "undefined" ? window.sessionStorage.getItem("bb_return_to") : null;
+        if (ret && ret.startsWith("/shop")) dest = ret;
+        if (typeof window !== "undefined") window.sessionStorage.removeItem("bb_return_to");
+      } catch {}
+      router.replace(dest);
+    } else router.replace("/login");
   }, [loading, user, router]);
 
   return (

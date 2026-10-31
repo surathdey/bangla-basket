@@ -108,7 +108,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const authUrl = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
 
     if (Platform.OS === "web") {
-      if (typeof window !== "undefined") window.location.href = authUrl;
+      if (typeof window !== "undefined") {
+        // Remember where the user came from (e.g. /shop/cart) so the app can
+        // send them back there after OAuth — Emergent always returns to "/".
+        // sessionStorage survives the round-trip in the same tab.
+        try { window.sessionStorage.setItem("bb_return_to", window.location.pathname); } catch {}
+        window.location.href = authUrl;
+      }
       return;
     }
     const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl);
