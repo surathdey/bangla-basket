@@ -630,7 +630,8 @@ class Coupon(BaseModel):
     first_time_only: bool = False           # only redeemable by customers who've never ordered
     applies_to: str = "all"                 # all | grocery_only | weekly_meal_only | all_except_weekly_meal
     used_count: int = 0                     # total redemptions so far
-    owner_user_id: Optional[str] = None     # set for auto-issued personal (first-time) coupons
+    owner_user_id: Optional[str] = None     # set for personal coupons (legacy auto-issued first-time coupons; no longer issued)
+    is_welcome: bool = False                # the ONE shared welcome code (WELCOME20); auto-applied, once per customer
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -975,28 +976,10 @@ async def _resolve_referral(code: Optional[str], user, snapshots):
     return base * 10 // 100, ref["user_id"], None
 
 
-async def _issue_first_time_coupon(user: dict) -> Optional[dict]:
-    settings = await _get_settings()
-    if not settings.get("first_time_coupon_enabled", True):
-        return None
-    existing = await db.coupons.find_one({"owner_user_id": user["user_id"]}, {"_id": 0})
-    if existing:
-        return existing
-    pct = int(settings.get("first_time_coupon_percent", 20))
-    code = f"WELCOME{_secrets.randbelow(9000) + 1000}"
-    while await db.coupons.find_one({"code": code}):
-        code = f"WELCOME{_secrets.randbelow(9000) + 1000}"
-    doc = Coupon(code=code, discount_type="percent", value=pct, active=True,
-                 description=f"{pct}% off your first order — welcome to {BRAND_NAME}!",
-                 per_customer_limit=1, usage_limit=1, first_time_only=False,
-                 applies_to="all_except_weekly_meal",
-                 owner_user_id=user["user_id"]).model_dump()
-    await db.coupons.insert_one(doc)
-    return doc
-
-
 async def _handle_first_login(user_id: str):
-    """On a customer's first successful login: flag it + issue the first-time coupon."""
+    """On a customer's first successful login: flag it + ensure a referral code.
+    The welcome discount is ONE shared code (WELCOME20) for everyone — nothing
+    is issued per customer here, so 100 new users still mean just 1 coupon."""
     try:
         await _ensure_referral_code(user_id)
     except Exception as e:
@@ -1006,10 +989,6 @@ async def _handle_first_login(user_id: str):
         return
     await db.users.update_one({"user_id": user_id},
         {"$set": {"has_logged_in": True, "first_login_at": datetime.now(timezone.utc)}})
-    try:
-        await _issue_first_time_coupon(u)
-    except Exception as e:
-        log.warning(f"[first_login] coupon issue failed: {e}")
 
 
 import base64 as _b64
@@ -2403,15 +2382,15 @@ async def _resolve_coupon(code: Optional[str], subtotal: int, user: User, snapsh
 
 
 async def _auto_first_time_coupon(user: User, subtotal: int, snapshots=None):
-    """First-time discount, applied by default: when the customer did not type
-    a coupon code, resolve their unused personal welcome coupon (the one
-    issued at first login: owned by the user, applies_to all_except_weekly_meal).
-    Returns (discount_cents, code) or (0, None). Never an error, and never
-    applied when the discount base is zero (e.g. a weekly-meal-only cart)."""
+    """Shared welcome discount, applied by default: when the customer did not
+    type a coupon code, resolve the ONE shared welcome coupon (is_welcome).
+    One code for everyone, one use per customer (per_customer_limit enforced
+    by _resolve_coupon). Returns (discount_cents, code) or (0, None). Never an
+    error, and never applied when the discount base is zero (e.g. a
+    weekly-meal-only cart, since the welcome coupon excludes weekly meals)."""
     if getattr(user, "role", None) == "guest":
         return 0, None
-    async for c in db.coupons.find({"owner_user_id": user.user_id, "active": True,
-                                    "applies_to": "all_except_weekly_meal"}, {"_id": 0}):
+    async for c in db.coupons.find({"is_welcome": True, "active": True}, {"_id": 0}):
         d, code, err = await _resolve_coupon(c["code"], subtotal, user, snapshots)
         if not err and d > 0:
             return d, code
@@ -4462,6 +4441,8 @@ class CouponUpsertReq(BaseModel):
     usage_limit: int = 0
     per_customer_limit: int = 0
     first_time_only: bool = False
+    applies_to: str = "all"
+    is_welcome: bool = False
 
 
 @api.get("/admin/coupons")
@@ -5569,7 +5550,7 @@ table{{width:100%;border-collapse:collapse;margin-top:8px;font-size:14px}}th,td{
 @media print{{body{{margin:0}}.no-print{{display:none}}}}
 button{{background:var(--brand);color:#fff;border:0;padding:10px 16px;border-radius:999px;cursor:pointer;font-weight:800}}
 </style></head><body>
-<div class="head"><div><div class="brand">{BRAND_NAME}</div><div class="sub">{settings.get('kitchen_address','Greater Toronto Area · GTA')} · {settings.get('phone','')}</div></div>
+<div class="head"><div><div class="brand">{BRAND_NAME}</div><div class="sub">{settings.get('kitchen_address','Greater Toronto Area · GTA')}</div></div>
 <div style="text-align:right"><span class="badge">INVOICE</span><h2>#{order_id[-6:].upper()}</h2><div class="sub">{(order['created_at'].isoformat() if hasattr(order['created_at'], 'isoformat') else str(order['created_at']))[:10]}</div></div></div>
 <div class="grid"><div class="card"><h3>BILL TO</h3><div><strong>{(user or {{}}).get('name','Guest')}</strong></div><div class="muted">{(user or {{}}).get('email','')}</div><div>{order.get('phone','')}</div></div>
 <div class="card"><h3>DELIVER TO</h3><div>{order['address'].get('line1','')}{', '+order['address']['line2'] if order['address'].get('line2') else ''}</div><div class="muted">{order['address'].get('city','')}, {order['address'].get('postal_code','')}</div><div>Slot: {order['slot'].get('window','').replace('_',' ')} · {order['slot'].get('date','')}</div></div></div>
