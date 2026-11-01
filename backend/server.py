@@ -5412,11 +5412,19 @@ def _wa_as_dt(value):
 
 
 def _wa_norm_phone(raw) -> str:
-    """Strip Twilio's 'whatsapp:' prefix + spaces/dashes from a phone."""
+    """Strip Twilio's 'whatsapp:' prefix + spaces/dashes from a phone.
+    Bare 10-digit NANP numbers (as stored on user docs, e.g. 6476094072)
+    become +1 E164, so they pass _wa_valid_e164 and match Twilio's E164
+    message phones; 11-digit numbers starting with 1 get a '+' prefix."""
     phone = (raw or "").strip()
     if phone.lower().startswith("whatsapp:"):
         phone = phone[len("whatsapp:"):]
-    return phone.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    phone = phone.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    if phone.isdigit() and len(phone) == 10:
+        phone = "+1" + phone
+    elif phone.isdigit() and len(phone) == 11 and phone.startswith("1"):
+        phone = "+" + phone
+    return phone
 
 
 def _wa_valid_e164(phone: str) -> bool:
