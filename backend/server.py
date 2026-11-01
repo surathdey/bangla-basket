@@ -16,6 +16,7 @@ import asyncio
 import logging
 import uuid
 import re
+import shutil
 import httpx
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
@@ -4018,6 +4019,10 @@ def _analytics_day_key(dt: datetime) -> str:
     return dt.astimezone(_ANALYTICS_TZ).date().isoformat()
 
 
+def _analytics_hour_key(dt: datetime) -> str:
+    return dt.astimezone(_ANALYTICS_TZ).strftime("%H:00")
+
+
 def _as_dt(value: Any) -> Optional[datetime]:
     if isinstance(value, datetime):
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
@@ -4072,6 +4077,17 @@ async def admin_analytics_summary(days: int = 7, admin=Depends(_current_admin)):
         }
         d += timedelta(days=1)
 
+    # Today view also seeds 24 hourly buckets (Toronto clock) so the chart
+    # can show intraday shape; other ranges leave hourly empty.
+    hourly: Dict[str, Dict[str, Any]] = {}
+    if days == 1:
+        for h in range(24):
+            key = f"{h:02d}:00"
+            hourly[key] = {
+                "hour": key, "sessions": set(),
+                "page_views": 0, "cart_adds": 0, "orders": 0,
+            }
+
     for e in events:
         sess = e.get("session")
         if sess:
@@ -4084,6 +4100,14 @@ async def admin_analytics_summary(days: int = 7, admin=Depends(_current_admin)):
             continue
         if sess:
             bucket["sessions"].add(sess)
+        hbucket = hourly.get(_analytics_hour_key(ts)) if hourly else None
+        if hbucket is not None:
+            if sess:
+                hbucket["sessions"].add(sess)
+            if e.get("type") == "page_view":
+                hbucket["page_views"] += 1
+            elif e.get("type") == "cart_add":
+                hbucket["cart_adds"] += 1
         if e.get("type") == "page_view":
             bucket["page_views"] += 1
         elif e.get("type") == "cart_add":
@@ -4105,6 +4129,10 @@ async def admin_analytics_summary(days: int = 7, admin=Depends(_current_admin)):
         bucket = daily.get(_analytics_day_key(created))
         if bucket is not None:
             bucket["orders"] += 1
+        if hourly:
+            hbucket = hourly.get(_analytics_hour_key(created))
+            if hbucket is not None:
+                hbucket["orders"] += 1
 
     def _ts_sort_key(e: Dict[str, Any]) -> float:
         ts = _as_dt(e.get("ts"))
@@ -4134,6 +4162,14 @@ async def admin_analytics_summary(days: int = 7, admin=Depends(_current_admin)):
         "orders": b["orders"],
     } for b in daily.values()]
 
+    hourly_out = [{
+        "hour": b["hour"],
+        "sessions": len(b["sessions"]),
+        "page_views": b["page_views"],
+        "cart_adds": b["cart_adds"],
+        "orders": b["orders"],
+    } for b in hourly.values()]
+
     return {
         "days": days,
         "window_start": start.isoformat(),
@@ -4147,6 +4183,129 @@ async def admin_analytics_summary(days: int = 7, admin=Depends(_current_admin)):
         "top_items": sorted(top.values(), key=lambda r: (-r["adds"], -r["qty"]))[:10],
         "recent": recent,
         "daily": daily_out,
+        "hourly": hourly_out,
+    }
+
+
+# ==========================================================
+# SYSTEM HEALTH (AWS box vitals for the admin Analytics page)
+# ==========================================================
+def _read_cpu_times() -> Optional[tuple]:
+    """First 'cpu' line of /proc/stat as (idle, total). None if unreadable.
+    Total uses the first 8 fields (guest/guest_nice are already counted
+    inside user/nice, so they are excluded, not double-counted)."""
+    try:
+        with open("/proc/stat") as f:
+            parts = f.readline().split()
+        if not parts or parts[0] != "cpu" or len(parts) < 6:
+            return None
+        vals = [float(x) for x in parts[1:9]]
+        idle = vals[3] + vals[4]
+        return (idle, sum(vals))
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+@api.get("/admin/system/health")
+async def admin_system_health(admin=Depends(_current_admin)):
+    """Host vitals for the admin Analytics page. Inside the container,
+    /proc reflects the HOST, which is exactly what the owner wants (the
+    AWS box). Pure stdlib. Any unreadable source yields null fields plus
+    an error note — never a 500."""
+    errors: List[str] = []
+    cpu_percent: Optional[float] = None
+    try:
+        first = _read_cpu_times()
+        if first is None:
+            errors.append("cpu: /proc/stat unreadable")
+        else:
+            await asyncio.sleep(0.3)
+            second = _read_cpu_times()
+            if second is None:
+                errors.append("cpu: /proc/stat unreadable on second read")
+            else:
+                idle_delta = second[0] - first[0]
+                total_delta = second[1] - first[1]
+                if total_delta > 0:
+                    cpu_percent = round(100.0 * (1.0 - idle_delta / total_delta), 1)
+                else:
+                    errors.append("cpu: no time elapsed between reads")
+    except Exception as exc:
+        errors.append(f"cpu: {exc}")
+
+    mem_total_mb: Optional[float] = None
+    mem_used_mb: Optional[float] = None
+    mem_percent: Optional[float] = None
+    try:
+        meminfo: Dict[str, float] = {}
+        with open("/proc/meminfo") as f:
+            for line in f:
+                key, _, rest = line.partition(":")
+                num = rest.strip().split()
+                if num:
+                    meminfo[key] = float(num[0])
+        total_kb = meminfo.get("MemTotal")
+        avail_kb = meminfo.get("MemAvailable")
+        if total_kb and avail_kb is not None:
+            mem_total_mb = round(total_kb / 1024.0, 1)
+            mem_used_mb = round((total_kb - avail_kb) / 1024.0, 1)
+            mem_percent = round(100.0 * (total_kb - avail_kb) / total_kb, 1)
+        else:
+            errors.append("mem: MemTotal/MemAvailable missing from /proc/meminfo")
+    except Exception as exc:
+        errors.append(f"mem: {exc}")
+
+    disk_total_gb: Optional[float] = None
+    disk_used_gb: Optional[float] = None
+    disk_percent: Optional[float] = None
+    try:
+        du = shutil.disk_usage("/")
+        disk_total_gb = round(du.total / (1024.0 ** 3), 1)
+        disk_used_gb = round(du.used / (1024.0 ** 3), 1)
+        disk_percent = round(100.0 * du.used / du.total, 1) if du.total else None
+    except Exception as exc:
+        errors.append(f"disk: {exc}")
+
+    load_1: Optional[float] = None
+    load_5: Optional[float] = None
+    load_15: Optional[float] = None
+    try:
+        with open("/proc/loadavg") as f:
+            parts = f.read().split()
+        load_1, load_5, load_15 = float(parts[0]), float(parts[1]), float(parts[2])
+    except Exception as exc:
+        errors.append(f"load: {exc}")
+
+    uptime_seconds: Optional[float] = None
+    try:
+        with open("/proc/uptime") as f:
+            uptime_seconds = float(f.read().split()[0])
+    except Exception as exc:
+        errors.append(f"uptime: {exc}")
+
+    cpu_count: Optional[int] = None
+    try:
+        with open("/proc/cpuinfo") as f:
+            cpu_count = sum(1 for line in f if line.startswith("processor"))
+        if not cpu_count:
+            cpu_count = None
+    except Exception:
+        cpu_count = None  # informational only; never an error
+
+    return {
+        "cpu_percent": cpu_percent,
+        "cpu_count": cpu_count,
+        "mem_total_mb": mem_total_mb,
+        "mem_used_mb": mem_used_mb,
+        "mem_percent": mem_percent,
+        "disk_total_gb": disk_total_gb,
+        "disk_used_gb": disk_used_gb,
+        "disk_percent": disk_percent,
+        "load_1": load_1,
+        "load_5": load_5,
+        "load_15": load_15,
+        "uptime_seconds": uptime_seconds,
+        "error": "; ".join(errors) if errors else None,
     }
 
 
