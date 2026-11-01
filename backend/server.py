@@ -3106,41 +3106,65 @@ async def _capture_stripe_fee(session_id: str, order_id: str, order: dict) -> No
     (by order_id). Fail-soft by design: any missing piece (no
     payment_intent, no charge, API error) leaves the fee fields null and
     the payment itself is unaffected. Callers wrap this in try/except.
+
+    A live payment's balance transaction can lag the session's paid
+    status by a few seconds, so a missing fee is retried twice (3s, 5s)
+    before giving up — and giving up now logs a warning instead of
+    failing silently, so a stuck fee is visible in the log.
     """
     stripe_sdk = _stripe()
-    try:
-        session = await run_in_threadpool(
-            stripe_sdk.checkout.Session.retrieve, session_id,
-            expand=["payment_intent.latest_charge.balance_transaction"],
-        )
-    except stripe.StripeError as e:
-        log.warning(f"stripe fee capture: session retrieve failed: {e}")
-        return
-    pi = getattr(session, "payment_intent", None)
-    charge = getattr(pi, "latest_charge", None) if pi else None
-    if isinstance(charge, str):
+
+    async def _fetch_fee():
+        """One retrieve+parse attempt. Returns (fee, charged) or (None, None)."""
         try:
-            charge = await run_in_threadpool(
-                stripe_sdk.Charge.retrieve, charge,
-                expand=["balance_transaction"],
+            session = await run_in_threadpool(
+                stripe_sdk.checkout.Session.retrieve, session_id,
+                expand=["payment_intent.latest_charge.balance_transaction"],
             )
         except stripe.StripeError as e:
-            log.warning(f"stripe fee capture: charge retrieve failed: {e}")
-            return
-    bt = getattr(charge, "balance_transaction", None) if charge else None
-    if isinstance(bt, str):
-        try:
-            bt = await run_in_threadpool(
-                stripe_sdk.BalanceTransaction.retrieve, bt
-            )
-        except stripe.StripeError as e:
-            log.warning(f"stripe fee capture: balance transaction retrieve failed: {e}")
-            return
-    fee = getattr(bt, "fee", None) if bt else None
+            log.warning(f"stripe fee capture: session retrieve failed: {e}")
+            return None, None
+        pi = getattr(session, "payment_intent", None)
+        charge = getattr(pi, "latest_charge", None) if pi else None
+        if isinstance(charge, str):
+            try:
+                charge = await run_in_threadpool(
+                    stripe_sdk.Charge.retrieve, charge,
+                    expand=["balance_transaction"],
+                )
+            except stripe.StripeError as e:
+                log.warning(f"stripe fee capture: charge retrieve failed: {e}")
+                return None, None
+        bt = getattr(charge, "balance_transaction", None) if charge else None
+        if isinstance(bt, str):
+            try:
+                bt = await run_in_threadpool(
+                    stripe_sdk.BalanceTransaction.retrieve, bt
+                )
+            except stripe.StripeError as e:
+                log.warning(f"stripe fee capture: balance transaction retrieve failed: {e}")
+                return None, None
+        fee = getattr(bt, "fee", None) if bt else None
+        if not isinstance(fee, int):
+            return None, None
+        amount = getattr(bt, "amount", None) if bt else None
+        charged = amount if isinstance(amount, int) else int(order.get("total_cents", 0) or 0)
+        return fee, charged
+
+    fee = None
+    charged = None
+    for attempt in range(3):
+        fee, charged = await _fetch_fee()
+        if isinstance(fee, int):
+            break
+        if attempt < 2:
+            await asyncio.sleep(3 if attempt == 0 else 5)
     if not isinstance(fee, int):
+        log.warning(
+            f"stripe fee capture: fee unavailable after retries "
+            f"for order {order_id} session {session_id}"
+        )
         return
-    amount = getattr(bt, "amount", None) if bt else None
-    charged = amount if isinstance(amount, int) else int(order.get("total_cents", 0) or 0)
     net = charged - fee
     await db.payment_transactions.update_one(
         {"session_id": session_id},
