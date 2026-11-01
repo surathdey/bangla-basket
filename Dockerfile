@@ -28,11 +28,18 @@ COPY schema.sql /app/schema.sql
 RUN mkdir -p /app/backend/uploads/menu /app/backend/uploads/delivery \
              /app/backend/uploads/grocery
 
+# Persistent app-log dir (mounted from the host at Compose time, so logs
+# survive container recreates; plain `docker logs` resets on every redeploy).
+RUN mkdir -p /app/logs
+
 EXPOSE 8001
 
 # Apply the schema, then serve. The backend binds 0.0.0.0:8001 inside the
 # container; nginx (separate service) terminates TLS and proxies to it.
 # DATABASE_URL must point at the Compose "postgres" service (see .env.example).
+# App output (uvicorn access + app logs) is appended to /app/logs/backend.log
+# on the host, rotated by /etc/logrotate.d/bangla-basket-logs.
 CMD ["sh", "-c", \
      "psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f /app/schema.sql && \
-      exec uvicorn server:app --host 0.0.0.0 --port 8001"]
+      mkdir -p /app/logs && \
+      exec uvicorn server:app --host 0.0.0.0 --port 8001 >> /app/logs/backend.log 2>&1"]

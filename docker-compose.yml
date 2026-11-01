@@ -50,6 +50,10 @@ services:
       MINIO_ENDPOINT: http://minio:9000
     volumes:
       - uploads:/app/backend/uploads
+      # Host-persistent app logs: survive container recreates (unlike
+      # `docker logs`, which resets on every redeploy). Rotated on the
+      # host via /etc/logrotate.d/bangla-basket-logs.
+      - ./logs:/app/logs
     depends_on:
       postgres:
         condition: service_healthy
