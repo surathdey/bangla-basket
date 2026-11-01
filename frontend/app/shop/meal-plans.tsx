@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Modal,
   useWindowDimensions, Platform,
 } from "react-native";
 import { Image, ImageBackground } from "expo-image";
@@ -62,6 +62,9 @@ export default function ShopMealPlans() {
   const { add } = useCart();
   const [menu, setMenu] = useState<WeeklyMenu | null>(null);
   const [loading, setLoading] = useState(true);
+  // Dish popup: tapping a dish name/photo opens the full item (name is
+  // truncated with "..." in the rows, so the full name + photo live here).
+  const [popupDish, setPopupDish] = useState<{ dish: MenuItem; kind: "fixed" | "alacarte" } | null>(null);
 
   const isNarrow = width < 900;
   const contentWidth = Math.min(width, 1200);
@@ -132,21 +135,23 @@ export default function ShopMealPlans() {
     const isVeg = (it.veg_type || "vegetarian") === "vegetarian";
     return (
       <View style={styles.fixedRow} testID={`mp-fixed-${it.item_id}`}>
-        <View style={styles.fixedImgWrap}>
-          {it.image_url
-            ? <Image source={{ uri: mediaUrl(it.image_url) }} style={styles.fixedImg} contentFit="cover" transition={200} />
-            : <View style={[styles.fixedImg, { alignItems: "center", justifyContent: "center" }]}><Ionicons name="image-outline" size={24} color={MUTE} /></View>}
-        </View>
-        <View style={{ flex: 1, gap: 2 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <View style={[styles.vegMark, { borderColor: isVeg ? VEG : NONVEG }]}>
-              <View style={[styles.vegDot, { backgroundColor: isVeg ? VEG : NONVEG }]} />
-            </View>
-            <Text style={styles.dishName} numberOfLines={1}>{it.name}</Text>
+        <TouchableOpacity style={styles.fixedMain} onPress={() => setPopupDish({ dish: it, kind: "fixed" })} activeOpacity={0.7}>
+          <View style={styles.fixedImgWrap}>
+            {it.image_url
+              ? <Image source={{ uri: mediaUrl(it.image_url) }} style={styles.fixedImg} contentFit="cover" transition={200} />
+              : <View style={[styles.fixedImg, { alignItems: "center", justifyContent: "center" }]}><Ionicons name="image-outline" size={24} color={MUTE} /></View>}
           </View>
-          {!!it.description && <Text style={styles.dishDesc} numberOfLines={2}>{it.description}</Text>}
-          <Text style={styles.fixedIncluded}>Included in this week's plan</Text>
-        </View>
+          <View style={{ flex: 1, gap: 2 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <View style={[styles.vegMark, { borderColor: isVeg ? VEG : NONVEG }]}>
+                <View style={[styles.vegDot, { backgroundColor: isVeg ? VEG : NONVEG }]} />
+              </View>
+              <Text style={styles.dishName} numberOfLines={1}>{it.name}</Text>
+            </View>
+            {!!it.description && <Text style={styles.dishDesc} numberOfLines={2}>{it.description}</Text>}
+            <Text style={styles.fixedIncluded}>Included in this week's plan</Text>
+          </View>
+        </TouchableOpacity>
         <View style={[styles.fixedStepper, { opacity: 0.45 }]}>
           <View style={styles.fixedStepBtn}><Text style={styles.fixedStepText}>−</Text></View>
           <Text style={styles.fixedQty}>1</Text>
@@ -160,21 +165,23 @@ export default function ShopMealPlans() {
     const isVeg = (it.veg_type || "vegetarian") === "vegetarian";
     return (
       <View style={styles.dish} testID={`mp-dish-${it.item_id}`}>
-        <View style={styles.dishImgWrap}>
-          {it.image_url
-            ? <Image source={{ uri: mediaUrl(it.image_url) }} style={styles.dishImg} contentFit="cover" transition={200} />
-            : <View style={[styles.dishImg, { alignItems: "center", justifyContent: "center" }]}><Ionicons name="image-outline" size={24} color={MUTE} /></View>}
-        </View>
-        <View style={{ padding: spacing.md, gap: 4 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <View style={[styles.vegMark, { borderColor: isVeg ? VEG : NONVEG }]}>
-              <View style={[styles.vegDot, { backgroundColor: isVeg ? VEG : NONVEG }]} />
-            </View>
-            <Text style={styles.dishName} numberOfLines={1}>{it.name}</Text>
+        <TouchableOpacity onPress={() => setPopupDish({ dish: it, kind: "alacarte" })} activeOpacity={0.7}>
+          <View style={styles.dishImgWrap}>
+            {it.image_url
+              ? <Image source={{ uri: mediaUrl(it.image_url) }} style={styles.dishImg} contentFit="cover" transition={200} />
+              : <View style={[styles.dishImg, { alignItems: "center", justifyContent: "center" }]}><Ionicons name="image-outline" size={24} color={MUTE} /></View>}
           </View>
-          {!!it.description && <Text style={styles.dishDesc} numberOfLines={2}>{it.description}</Text>}
-          <Text style={styles.dishPrice}>À la carte {centsToCAD(it.price_cents)}</Text>
-        </View>
+          <View style={{ padding: spacing.md, gap: 4 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <View style={[styles.vegMark, { borderColor: isVeg ? VEG : NONVEG }]}>
+                <View style={[styles.vegDot, { backgroundColor: isVeg ? VEG : NONVEG }]} />
+              </View>
+              <Text style={styles.dishName} numberOfLines={1}>{it.name}</Text>
+            </View>
+            {!!it.description && <Text style={styles.dishDesc} numberOfLines={2}>{it.description}</Text>}
+            <Text style={styles.dishPrice}>À la carte {centsToCAD(it.price_cents)}</Text>
+          </View>
+        </TouchableOpacity>
       </View>
     );
   };
@@ -331,6 +338,35 @@ export default function ShopMealPlans() {
         )}
         <ShopFooter />
       </ScrollView>
+
+      {/* DISH POPUP: full name + big photo + description, since rows truncate */}
+      <Modal visible={!!popupDish} transparent animationType="fade" onRequestClose={() => setPopupDish(null)}>
+        <View style={styles.popupOverlay}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setPopupDish(null)} testID="dish-popup-backdrop" />
+          <View style={[styles.popupCard, { width: Math.min(width - 48, 480) }]} testID="dish-popup-modal">
+            <ScrollView>
+              {!!popupDish?.dish.image_url && (
+                <Image source={{ uri: mediaUrl(popupDish.dish.image_url) }} style={styles.popupImg} contentFit="cover" />
+              )}
+              <View style={{ padding: spacing.lg, gap: 8 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <View style={[styles.vegMark, { borderColor: (popupDish?.dish.veg_type || "vegetarian") === "vegetarian" ? VEG : NONVEG }]}>
+                    <View style={[styles.vegDot, { backgroundColor: (popupDish?.dish.veg_type || "vegetarian") === "vegetarian" ? VEG : NONVEG }]} />
+                  </View>
+                  <Text style={styles.popupName}>{popupDish?.dish.name}</Text>
+                </View>
+                {!!popupDish?.dish.description && <Text style={styles.popupDesc}>{popupDish.dish.description}</Text>}
+                <Text style={[styles.popupNote, { color: popupDish?.kind === "fixed" ? VEG : BLUE }]}>
+                  {popupDish?.kind === "fixed" ? "Included in this week's plan" : `À la carte ${popupDish ? centsToCAD(popupDish.dish.price_cents) : ""}`}
+                </Text>
+              </View>
+            </ScrollView>
+            <TouchableOpacity testID="dish-popup-close" style={styles.popupClose} onPress={() => setPopupDish(null)}>
+              <Ionicons name="close" size={22} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -394,6 +430,7 @@ const styles = StyleSheet.create({
   dishPrice: { fontSize: 13, fontWeight: "700", color: BLUE, marginTop: 2 },
 
   fixedRow: { flexDirection: "row", gap: spacing.md, alignItems: "center", backgroundColor: "#fff", borderRadius: radius.lg, borderWidth: 1, borderColor: "#F0E6D8", padding: spacing.md, ...shadows.soft },
+  fixedMain: { flex: 1, flexDirection: "row", gap: spacing.md, alignItems: "center" },
   fixedImgWrap: { width: 96, height: 96, borderRadius: radius.md, overflow: "hidden", backgroundColor: CREAM },
   fixedImg: { width: "100%", height: "100%" },
   fixedIncluded: { fontSize: 12, fontWeight: "700", color: VEG, marginTop: 2 },
@@ -407,4 +444,12 @@ const styles = StyleSheet.create({
 
   emptyTitle: { fontSize: 18, fontWeight: "800", color: INK, marginTop: spacing.md, textAlign: "center" },
   emptySub: { fontSize: 14, color: MUTE, marginTop: 4, marginBottom: spacing.md, textAlign: "center" },
+
+  popupOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", alignItems: "center", justifyContent: "center", padding: 24 },
+  popupCard: { backgroundColor: "#fff", borderRadius: radius.xl, overflow: "hidden", maxHeight: 640, ...shadows.card },
+  popupImg: { width: "100%", aspectRatio: 16 / 10, backgroundColor: CREAM },
+  popupName: { fontSize: 20, fontWeight: "900", color: INK, flex: 1 },
+  popupDesc: { fontSize: 15, color: MUTE, lineHeight: 22 },
+  popupNote: { fontSize: 13, fontWeight: "800", marginTop: 2 },
+  popupClose: { position: "absolute", top: 10, right: 10, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.55)", alignItems: "center", justifyContent: "center", zIndex: 2 },
 });
