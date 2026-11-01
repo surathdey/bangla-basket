@@ -3046,6 +3046,58 @@ async def checkout_webhook(request: Request):
     return {"received": True}
 
 
+async def _capture_stripe_fee(session_id: str, order_id: str, order: dict) -> None:
+    """Fetch the Stripe fee for a paid Checkout session and store it on
+    both the payment_transactions row (by session_id) and the orders row
+    (by order_id). Fail-soft by design: any missing piece (no
+    payment_intent, no charge, API error) leaves the fee fields null and
+    the payment itself is unaffected. Callers wrap this in try/except.
+    """
+    stripe_sdk = _stripe()
+    try:
+        session = await run_in_threadpool(
+            stripe_sdk.checkout.Session.retrieve, session_id,
+            expand=["payment_intent.latest_charge.balance_transaction"],
+        )
+    except stripe.StripeError as e:
+        log.warning(f"stripe fee capture: session retrieve failed: {e}")
+        return
+    pi = getattr(session, "payment_intent", None)
+    charge = getattr(pi, "latest_charge", None) if pi else None
+    if isinstance(charge, str):
+        try:
+            charge = await run_in_threadpool(
+                stripe_sdk.Charge.retrieve, charge,
+                expand=["balance_transaction"],
+            )
+        except stripe.StripeError as e:
+            log.warning(f"stripe fee capture: charge retrieve failed: {e}")
+            return
+    bt = getattr(charge, "balance_transaction", None) if charge else None
+    if isinstance(bt, str):
+        try:
+            bt = await run_in_threadpool(
+                stripe_sdk.BalanceTransaction.retrieve, bt
+            )
+        except stripe.StripeError as e:
+            log.warning(f"stripe fee capture: balance transaction retrieve failed: {e}")
+            return
+    fee = getattr(bt, "fee", None) if bt else None
+    if not isinstance(fee, int):
+        return
+    amount = getattr(bt, "amount", None) if bt else None
+    charged = amount if isinstance(amount, int) else int(order.get("total_cents", 0) or 0)
+    net = charged - fee
+    await db.payment_transactions.update_one(
+        {"session_id": session_id},
+        {"$set": {"stripe_fee_cents": fee, "stripe_net_cents": net}},
+    )
+    await db.orders.update_one(
+        {"order_id": order_id},
+        {"$set": {"stripe_fee_cents": fee, "stripe_net_cents": net}},
+    )
+
+
 async def checkout_status_finalize(session_id: str):
     """Mark a card order paid exactly once (guards against double-crediting).
 
@@ -3081,6 +3133,11 @@ async def checkout_status_finalize(session_id: str):
                   "points_awarded": points_awarded, "tracking_events": tracking, "updated_at": now}},
     )
     fresh = await db.orders.find_one({"order_id": order["order_id"]}, {"_id": 0}) or order
+    # Stripe fee capture (fail-soft): never blocks payment confirmation.
+    try:
+        await _capture_stripe_fee(session_id, order["order_id"], order)
+    except Exception as e:
+        log.warning(f"stripe fee capture fail: {e}")
     try:
         await _decrement_stock_for_order(fresh)
     except Exception as e:
@@ -3950,12 +4007,23 @@ async def admin_stats(admin=Depends(_current_admin)):
     ]
     agg = await db.orders.aggregate(pipe).to_list(1)
     revenue_cents = (agg[0]["sum"] if agg else 0) or 0
+    # Stripe fees kept by Stripe on paid card payments. payment_transactions
+    # rows exist only for card checkouts; rows without a captured fee
+    # (older paid rows, or a failed fee fetch) contribute 0 to the sum.
+    fee_pipe = [
+        {"$match": {"status": "paid"}},
+        {"$group": {"_id": None, "sum": {"$sum": "$stripe_fee_cents"}}},
+    ]
+    fee_agg = await db.payment_transactions.aggregate(fee_pipe).to_list(1)
+    stripe_fees_cents = (fee_agg[0]["sum"] if fee_agg else 0) or 0
     return {
         "total_orders": total_orders,
         "delivered": delivered,
         "active": active,
         "users": users,
         "revenue_cents": revenue_cents,
+        "stripe_fees_cents": stripe_fees_cents,
+        "net_revenue_cents": revenue_cents - stripe_fees_cents,
     }
 
 

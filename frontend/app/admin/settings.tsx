@@ -509,14 +509,9 @@ export default function AdminSettings() {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Payment Methods · {enabledCount} enabled</Text>
-        {/*
-          Stripe (Card) is temporarily disabled for MVP. Only COD and Interac
-          are active. To re-enable Stripe later:
-          (1) uncomment this block, (2) flip `payment_methods.stripe.enabled`
-          in business_settings, (3) uncomment the /api/checkout/* endpoints
-          in backend/server.py.
-        */}
-        {/*
+        {/* Stripe is live (test wiring Oct 31, 2026). Keys live in the server
+            .env (STRIPE_API_KEY / STRIPE_WEBHOOK_SECRET), not in this doc —
+            so no key fields here; the toggles below control checkout + HST. */}
         <PaymentCard
           testIDPrefix="pm-stripe"
           title="Stripe (Card + Google Pay + Apple Pay)"
@@ -526,11 +521,7 @@ export default function AdminSettings() {
           cfg={pm.stripe || DEFAULT_METHODS.stripe}
           onPatch={p => patchMethod("stripe", p)}
           taxLabel={s.tax_label}
-        >
-          <Field label="Stripe Publishable Key (pk_...)" testID="pm-stripe-pk" value={pm.stripe?.publishable_key || ""} onChange={t => patchMethod("stripe", { publishable_key: t })} />
-          <Field label="Stripe Secret Key (sk_...)"      testID="pm-stripe-sk" value={pm.stripe?.secret_key || ""}       onChange={t => patchMethod("stripe", { secret_key: t })} secureTextEntry />
-        </PaymentCard>
-        */}
+        />
 
         <PaymentCard
           testIDPrefix="pm-paypal"

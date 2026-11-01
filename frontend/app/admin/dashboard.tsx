@@ -7,11 +7,12 @@ import { adminApi, getAdminToken } from "@/src/adminApi";
 import { getBackendUrl } from "@/src/utils/backendUrl";
 import { colors, spacing, radius, shadows } from "@/src/theme";
 
-type Stats = { total_orders: number; delivered: number; active: number; users: number; revenue_cents: number; };
+type Stats = { total_orders: number; delivered: number; active: number; users: number; revenue_cents: number; stripe_fees_cents?: number; net_revenue_cents?: number; };
 
 type OrderRow = {
   order_id: string; status: string; payment_status: string; payment_method: string;
   total_cents: number; subtotal_cents: number; delivery_fee_cents: number; discount_cents: number;
+  stripe_fee_cents?: number | null; stripe_net_cents?: number | null;
   tax_cents?: number; tax_label?: string;
   coupon_code?: string | null; referral_code?: string | null; referral_discount_cents?: number;
   points_redeemed_cents?: number; points_redeemed?: number;
@@ -120,14 +121,17 @@ export default function AdminDashboard() {
 
   const exportOrdersCsv = () => {
     const rows = viewOrders;
-    const header = ["Order", "Date", "Customer", "Email", "Phone", "Items", "Item count", "Subtotal", "Delivery fee", "Coupon code", "Coupon discount", "Referral code", "Referral discount", "Points redeemed", "Tax", "Total", "Payment method", "Payment status", "Status", "City", "Postal code", "Slot date", "Slot window", "Notes"];
+    const header = ["Order", "Date", "Customer", "Email", "Phone", "Items", "Item count", "Subtotal", "Delivery fee", "Coupon code", "Coupon discount", "Referral code", "Referral discount", "Points redeemed", "Tax", "Total", "Stripe fee", "Net after Stripe fee", "Payment method", "Payment status", "Status", "City", "Postal code", "Slot date", "Slot window", "Notes"];
     const lines = rows.map(o => [
       shortId(o.order_id), fmtDate(o.created_at), custName(o), o.user_summary?.email || "", o.user_summary?.phone || "",
       (o.items_snapshot || []).map(it => `${it.quantity}x ${it.name}`).join("; "),
       (o.items_snapshot || []).reduce((s, it) => s + (it.quantity || 0), 0),
       money(o.subtotal_cents), money(o.delivery_fee_cents), o.coupon_code || "", money(o.discount_cents),
       o.referral_code || "", money(o.referral_discount_cents || 0), o.points_redeemed || 0,
-      money(o.tax_cents || 0), money(o.total_cents), o.payment_method, o.payment_status, o.status,
+      money(o.tax_cents || 0), money(o.total_cents),
+      o.payment_method === "card" && o.stripe_fee_cents != null ? money(o.stripe_fee_cents) : "",
+      o.payment_method === "card" && o.stripe_net_cents != null ? money(o.stripe_net_cents) : "",
+      o.payment_method, o.payment_status, o.status,
       o.address?.city || "", o.address?.postal_code || "", o.slot?.date || "", o.slot?.window || "",
       o.special_instructions || "",
     ].map(csvCell).join(","));
@@ -150,6 +154,12 @@ export default function AdminDashboard() {
           <View style={styles.grid}>
             <Stat testID="stat-revenue" icon="cash-outline" label="GROSS REVENUE" value={money(stats.revenue_cents)} color={colors.success}
               hint={`${stats.total_orders} orders counted`} active={view?.kind === "orders" && view.filter === "revenue"}
+              onPress={() => openView({ kind: "orders", title: "Revenue detail — all counted orders", filter: "revenue" })} />
+            <Stat testID="stat-stripe-fees" icon="card-outline" label="STRIPE FEES" value={money(stats.stripe_fees_cents || 0)} color="#B45309"
+              hint="Kept by Stripe on card payments" active={view?.kind === "orders" && view.filter === "revenue"}
+              onPress={() => openView({ kind: "orders", title: "Revenue detail — all counted orders", filter: "revenue" })} />
+            <Stat testID="stat-net-revenue" icon="wallet-outline" label="NET AFTER STRIPE FEES" value={money(stats.net_revenue_cents || 0)} color={colors.primary}
+              hint="Gross revenue minus Stripe fees" active={view?.kind === "orders" && view.filter === "revenue"}
               onPress={() => openView({ kind: "orders", title: "Revenue detail — all counted orders", filter: "revenue" })} />
             <Stat testID="stat-orders" icon="bag-handle-outline" label="ALL ORDERS" value={String(stats.total_orders)} color={colors.primary}
               hint="Tap to see every order" active={view?.kind === "orders" && view.filter === "all"}
@@ -192,7 +202,7 @@ export default function AdminDashboard() {
                   <ScrollView horizontal testID="dash-table">
                     <View>
                       <View style={[styles.row, styles.headerRow]}>
-                        {["Date", "Order", "Customer", "Items", "Subtotal", "Delivery", "Coupon", "Discount", "Referral", "Ref. discount", "Tax", "Total", "Pay", "Status"].map(h => (
+                        {["Date", "Order", "Customer", "Items", "Subtotal", "Delivery", "Coupon", "Discount", "Referral", "Ref. discount", "Tax", "Total", "Fee", "Net", "Pay", "Status"].map(h => (
                           <Text key={h} style={[styles.cell, styles.headerCell, h === "Customer" ? styles.wideCell : null]}>{h}</Text>
                         ))}
                       </View>
@@ -212,6 +222,8 @@ export default function AdminDashboard() {
                           <Text style={styles.cell}>{o.referral_code ? money(o.referral_discount_cents || 0) : "—"}</Text>
                           <Text style={styles.cell}>{money(o.tax_cents || 0)}</Text>
                           <Text style={[styles.cell, styles.boldCell]}>{money(o.total_cents)}</Text>
+                          <Text style={styles.cell}>{o.payment_method === "card" && o.stripe_fee_cents != null ? money(o.stripe_fee_cents) : "—"}</Text>
+                          <Text style={styles.cell}>{o.payment_method === "card" && o.stripe_net_cents != null ? money(o.stripe_net_cents) : "—"}</Text>
                           <Text style={styles.cell}>{o.payment_method}</Text>
                           <Text style={[styles.cell, { color: STATUS_COLORS[o.status] || colors.textMuted }]}>{o.status}</Text>
                         </TouchableOpacity>
