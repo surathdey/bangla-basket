@@ -30,6 +30,17 @@ CREATE TABLE IF NOT EXISTS admins (
 );
 CREATE INDEX IF NOT EXISTS admins_doc_gin ON admins USING GIN (doc);
 
+-- ------------------------------------------------------- analytics_events
+CREATE TABLE IF NOT EXISTS analytics_events (
+    ledger_id TEXT PRIMARY KEY,  -- surrogate; docs carry no business ID
+    seq BIGSERIAL,
+    doc JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS analytics_events_doc_gin
+    ON analytics_events USING GIN (doc);
+CREATE INDEX IF NOT EXISTS analytics_events_type_ts
+    ON analytics_events ((doc ->> 'type'), (doc ->> 'ts'));
+
 -- ------------------------------------------------------ business_settings
 CREATE TABLE IF NOT EXISTS business_settings (
     key TEXT PRIMARY KEY,

@@ -14,6 +14,7 @@ import { PlatformBanner } from "./PlatformBanner";
 
 const NAV = [
   { key: "/admin/dashboard", label: "Overview", icon: "grid-outline" as const },
+  { key: "/admin/analytics", label: "Analytics", icon: "stats-chart-outline" as const },
   { key: "/admin/master-menu", label: "Master Menu", icon: "library-outline" as const },
   { key: "/admin/menu", label: "Weekly Menu", icon: "restaurant-outline" as const },
   { key: "/admin/catering", label: "Catering", icon: "people-outline" as const },

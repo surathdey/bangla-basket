@@ -9,6 +9,7 @@
  */
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { storage } from "@/src/utils/storage";
+import { track } from "@/src/analytics";
 
 export type CateringSelection = {
   tier_id?: string;
@@ -114,6 +115,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       }
       return [...prev, { ...i, quantity: qty, cart_item_id: genId() }];
     });
+    // Anonymous launch analytics — fire-and-forget, never blocks the cart.
+    track("cart_add", { item_id: i.ref_id, item_name: i.name, qty });
   }, []);
 
   const remove = useCallback((cart_item_id: string) => {

@@ -1,10 +1,11 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, ScrollView } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, spacing } from "@/src/theme";
 import { ShopHeader } from "@/src/components/ShopHeader";
 import { ShopFooter } from "@/src/components/ShopFooter";
+import { track } from "@/src/analytics";
 import { ProductDetailBody } from "@/src/components/ProductDetailBody";
 
 /** Desktop-web product detail page — full site chrome (header, breadcrumb,
@@ -14,6 +15,11 @@ export default function ShopProduct() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [crumb, setCrumb] = useState<{ category: string; title: string }>({ category: "", title: "" });
+
+  // Anonymous launch analytics — page view, fire-and-forget.
+  useEffect(() => {
+    if (id) track("page_view", { path: `/shop/product/${id}` });
+  }, [id]);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>

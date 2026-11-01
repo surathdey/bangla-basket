@@ -61,6 +61,7 @@ import asyncpg
 # other field keeps whatever JSON type it was written with.
 TABLES = {
     "admins": (["email"], ["created_at"]),
+    "analytics_events": ([], ["ts"]),  # surrogate PK column: ledger_id
     "business_settings": (["key"], []),
     "catering_packages": (["package_id"], []),
     "catering_quote_requests": (["request_id"], ["created_at"]),

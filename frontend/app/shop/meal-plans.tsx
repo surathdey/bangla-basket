@@ -9,6 +9,7 @@ import Ionicons from "@react-native-vector-icons/ionicons";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@/src/api";
+import { track } from "@/src/analytics";
 import { useCart } from "@/src/cart";
 import { mediaUrl } from "@/src/utils/backendUrl";
 import { spacing, radius, shadows } from "@/src/theme";
@@ -64,6 +65,9 @@ export default function ShopMealPlans() {
 
   const isNarrow = width < 900;
   const contentWidth = Math.min(width, 1200);
+
+  // Anonymous launch analytics — page view, fire-and-forget.
+  useEffect(() => { track("page_view", { path: "/shop/meal-plans" }); }, []);
 
   useEffect(() => {
     (async () => {

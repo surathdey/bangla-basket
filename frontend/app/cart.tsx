@@ -10,6 +10,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Ionicons from "@react-native-vector-icons/ionicons";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCart } from "@/src/cart";
+import { track } from "@/src/analytics";
 import { useAuth } from "@/src/auth";
 import { api, BACKEND_URL } from "@/src/api";
 import { mediaUrl, getBackendUrl } from "@/src/utils/backendUrl";
@@ -292,6 +293,9 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
       Alert.alert("Missing info", "Please add your name, delivery address, phone, a valid email and pick a slot."); return;
     }
     setPlacing(true);
+    // Anonymous launch analytics — checkout started. Fire-and-forget: it
+    // never blocks or delays the order call below.
+    track("checkout_start");
     try {
       // Safety: make sure an anonymous web shopper has a session before ordering.
       if (!user) { await signInAsGuest(); }

@@ -21,6 +21,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Any, Dict
 from datetime import datetime, timezone, timedelta, date
+from zoneinfo import ZoneInfo
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -3954,6 +3955,198 @@ async def admin_stats(admin=Depends(_current_admin)):
         "active": active,
         "users": users,
         "revenue_cents": revenue_cents,
+    }
+
+
+# ==========================================================
+# ANALYTICS — launch monitoring (anonymous, NO PII)
+# ==========================================================
+# Event docs (collection: analytics_events) carry ONLY:
+#   type, ts (server-set), session (anonymous random string from the
+#   client), path (page_view), item_id / item_name / qty (cart_add).
+# Names, emails, phones, addresses and any other personal data are never
+# accepted: the ingest endpoint whitelists exactly these fields and drops
+# everything else, so a chatty or hostile client cannot smuggle PII in.
+_ANALYTICS_TYPES = {"page_view", "cart_view", "cart_add", "checkout_start", "search"}
+_ANALYTICS_DAYS = {1, 7, 30}
+_ANALYTICS_TZ = ZoneInfo("America/Toronto")
+# Window fetch for sessions / top items / daily / recent. Headline counts
+# use count_documents (exact at any scale); only the breakdowns are capped,
+# and launch traffic is far below this bound.
+_ANALYTICS_FETCH_LIMIT = 50000
+
+
+class _AnalyticsEventReq(BaseModel):
+    type: str
+    session: Optional[str] = None
+    path: Optional[str] = None
+    item_id: Optional[str] = None
+    item_name: Optional[str] = None
+    qty: Optional[int] = None
+
+
+@api.post("/analytics/event")
+async def analytics_event(req: _AnalyticsEventReq):
+    """Public, unauthenticated ingest. Accepts ONLY the five known event
+    types; anything else is a 400. Unknown body fields are ignored by the
+    model AND never copied into the stored doc (whitelist below)."""
+    if req.type not in _ANALYTICS_TYPES:
+        raise HTTPException(400, f"unknown analytics type: {req.type}")
+    session = (req.session or "").strip()[:128] or uuid.uuid4().hex
+    doc: Dict[str, Any] = {
+        "type": req.type,
+        "ts": datetime.now(timezone.utc),
+        "session": session,
+    }
+    if req.path is not None:
+        doc["path"] = str(req.path)[:512]
+    if req.item_id is not None:
+        doc["item_id"] = str(req.item_id)[:128]
+    if req.item_name is not None:
+        doc["item_name"] = str(req.item_name)[:200]
+    if req.qty is not None:
+        try:
+            qty = int(req.qty)
+        except (TypeError, ValueError):
+            qty = 1
+        doc["qty"] = max(1, min(999, qty))
+    await db.analytics_events.insert_one(doc)
+    return {"ok": True}
+
+
+def _analytics_day_key(dt: datetime) -> str:
+    return dt.astimezone(_ANALYTICS_TZ).date().isoformat()
+
+
+def _as_dt(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return None
+
+
+@api.get("/admin/analytics/summary")
+async def admin_analytics_summary(days: int = 7, admin=Depends(_current_admin)):
+    """Admin-only launch funnel. days=1 means 'today' (Toronto midnight to
+    now); 7/30 are trailing windows. Orders use the same convention as
+    /admin/stats: pending_payment orders are NOT counted."""
+    if days not in _ANALYTICS_DAYS:
+        raise HTTPException(400, "days must be 1, 7, or 30")
+    now = datetime.now(timezone.utc)
+    if days == 1:
+        start = now.astimezone(_ANALYTICS_TZ).replace(
+            hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    else:
+        start = now - timedelta(days=days)
+
+    # Exact headline counts (no fetch cap involved).
+    counts = {}
+    for t in ("page_view", "cart_view", "cart_add", "checkout_start"):
+        counts[t] = await db.analytics_events.count_documents(
+            {"type": t, "ts": {"$gte": start}})
+    orders = await db.orders.count_documents(
+        {"status": {"$ne": "pending_payment"}, "created_at": {"$gte": start}})
+
+    # One window fetch drives sessions / top items / daily / recent.
+    events = await db.analytics_events.find(
+        {"ts": {"$gte": start}}).limit(_ANALYTICS_FETCH_LIMIT).to_list()
+    order_docs = await db.orders.find(
+        {"created_at": {"$gte": start},
+         "status": {"$ne": "pending_payment"}}).to_list()
+
+    sessions: set = set()
+    top: Dict[str, Dict[str, Any]] = {}
+    # Seed every day in the window so empty days render as 0, not missing.
+    daily: Dict[str, Dict[str, Any]] = {}
+    d = start.astimezone(_ANALYTICS_TZ).date()
+    end_d = now.astimezone(_ANALYTICS_TZ).date()
+    while d <= end_d:
+        daily[d.isoformat()] = {
+            "date": d.isoformat(), "sessions": set(),
+            "page_views": 0, "cart_adds": 0, "orders": 0,
+        }
+        d += timedelta(days=1)
+
+    for e in events:
+        sess = e.get("session")
+        if sess:
+            sessions.add(sess)
+        ts = _as_dt(e.get("ts"))
+        if ts is None:
+            continue
+        bucket = daily.get(_analytics_day_key(ts))
+        if bucket is None:
+            continue
+        if sess:
+            bucket["sessions"].add(sess)
+        if e.get("type") == "page_view":
+            bucket["page_views"] += 1
+        elif e.get("type") == "cart_add":
+            bucket["cart_adds"] += 1
+            item_id = str(e.get("item_id") or "unknown")
+            row = top.get(item_id)
+            if row is None:
+                row = {"item_id": item_id,
+                       "item_name": str(e.get("item_name") or item_id),
+                       "adds": 0, "qty": 0}
+                top[item_id] = row
+            row["adds"] += 1
+            qty = e.get("qty")
+            row["qty"] += qty if isinstance(qty, int) else 1
+    for o in order_docs:
+        created = _as_dt(o.get("created_at"))
+        if created is None:
+            continue
+        bucket = daily.get(_analytics_day_key(created))
+        if bucket is not None:
+            bucket["orders"] += 1
+
+    def _ts_sort_key(e: Dict[str, Any]) -> float:
+        ts = _as_dt(e.get("ts"))
+        return ts.timestamp() if ts else 0.0
+
+    recent = []
+    for e in sorted(events, key=_ts_sort_key, reverse=True)[:50]:
+        ts = _as_dt(e.get("ts"))
+        sess = str(e.get("session") or "")
+        recent.append({
+            "type": e.get("type"),
+            "ts": ts.isoformat() if ts else None,
+            "path": e.get("path"),
+            "item_id": e.get("item_id"),
+            "item_name": e.get("item_name"),
+            "qty": e.get("qty"),
+            # Random session ids are not PII, but only a prefix is needed
+            # to correlate a visitor's recent actions in the table.
+            "session": sess[:8] if sess else None,
+        })
+
+    daily_out = [{
+        "date": b["date"],
+        "sessions": len(b["sessions"]),
+        "page_views": b["page_views"],
+        "cart_adds": b["cart_adds"],
+        "orders": b["orders"],
+    } for b in daily.values()]
+
+    return {
+        "days": days,
+        "window_start": start.isoformat(),
+        "window_end": now.isoformat(),
+        "sessions": len(sessions),
+        "page_views": counts["page_view"],
+        "cart_views": counts["cart_view"],
+        "cart_adds": counts["cart_add"],
+        "checkout_starts": counts["checkout_start"],
+        "orders": orders,
+        "top_items": sorted(top.values(), key=lambda r: (-r["adds"], -r["qty"]))[:10],
+        "recent": recent,
+        "daily": daily_out,
     }
 
 

@@ -9,6 +9,7 @@ import Ionicons from "@react-native-vector-icons/ionicons";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCart } from "@/src/cart";
+import { track } from "@/src/analytics";
 import { api } from "@/src/api";
 import { mediaUrl } from "@/src/utils/backendUrl";
 import { BRAND } from "@/src/brand";
@@ -55,6 +56,9 @@ export default function ShopHome() {
   const { postal, gated, showHelp } = usePricingLocation();
   const isNarrow = width < 900;
   const contentWidth = Math.min(width, 1200);
+
+  // Anonymous launch analytics — page view, fire-and-forget.
+  useEffect(() => { track("page_view", { path: "/shop" }); }, []);
 
   const scrollRef = useRef<ScrollView>(null);
   const aboutY = useRef(0);

@@ -9,6 +9,7 @@ import Ionicons from "@react-native-vector-icons/ionicons";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCart } from "@/src/cart";
+import { track } from "@/src/analytics";
 import { api } from "@/src/api";
 import { mediaUrl } from "@/src/utils/backendUrl";
 import { BRAND } from "@/src/brand";
@@ -34,6 +35,9 @@ export default function ShopBrowse() {
   const params = useLocalSearchParams<{ category?: string; q?: string }>();
   const comingSoon = useComingSoon();
   const { postal, gated, showHelp } = usePricingLocation();
+
+  // Anonymous launch analytics — page view, fire-and-forget.
+  useEffect(() => { track("page_view", { path: "/shop/browse" }); }, []);
 
   const [cats, setCats] = useState<Cat[]>([]);
   const [active, setActive] = useState<string>(params.category || "All");
