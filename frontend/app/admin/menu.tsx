@@ -46,6 +46,7 @@ type WeeklyMenu = {
   status?: string; published?: boolean;
   alacarte_enabled?: boolean;
   package_enabled?: boolean;
+  order_days?: number[];  // JS day numbers 0=Sunday..6=Saturday; absent = open every day
   package?: WeeklyPackage | null;
   complimentary_master_ids?: string[];
 };
@@ -53,6 +54,9 @@ type WeeklyMenu = {
 type Section = "alacarte" | "package" | "complimentary" | "always";
 
 const AVAIL: WeeklyLine["availability"][] = ["available", "low_inventory", "sold_out"];
+
+/** JS day numbers, Sunday=0..Saturday=6 — matches the backend order_days field. */
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 function sundayOf(d: Date): string {
   const day = d.getDay();
@@ -299,6 +303,17 @@ export default function AdminMenu() {
     await patchSettings({ package_enabled: next });
   };
 
+  // Order days: which weekdays customers may order this menu. Absent in the
+  // doc means open every day, so the chips default to all selected.
+  const orderDays = current?.order_days ?? [0, 1, 2, 3, 4, 5, 6];
+  const toggleOrderDay = async (d: number) => {
+    if (!current) return;
+    const next = orderDays.includes(d)
+      ? orderDays.filter(x => x !== d)
+      : [...orderDays, d].sort((a, b) => a - b);
+    await patchSettings({ order_days: next });
+  };
+
   const openPackageEditor = () => {
     if (!current) return;
     const p = current.package || {
@@ -451,6 +466,26 @@ export default function AdminMenu() {
                 <TouchableOpacity testID="delete-week-btn" style={styles.dangerBtn} onPress={deleteWeek}>
                   <Ionicons name="trash-outline" size={16} color={colors.danger} />
                 </TouchableOpacity>
+              </View>
+
+              {/* Order days — which weekdays customers may order this menu */}
+              <View style={styles.modeCard} testID="week-order-days">
+                <Text style={styles.modeTitle}>Order days</Text>
+                <Text style={styles.modeHint}>Customers can order this weekly menu only on the selected days. On other days the menu page shows when it can be ordered instead of the dishes.</Text>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  {WEEKDAY_NAMES.map((name, d) => {
+                    const on = orderDays.includes(d);
+                    return (
+                      <TouchableOpacity key={d} testID={`week-order-day-${d}`}
+                        style={[styles.pill, on ? styles.pillOn : styles.pillOff]} onPress={() => toggleOrderDay(d)}>
+                        <Text style={[styles.pillText, on && { color: "#fff" }]}>{name}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                {orderDays.length === 0 && (
+                  <Text style={styles.modeHint}>No days selected — the menu stays open every day.</Text>
+                )}
               </View>
 
               {/* Section switcher — the 4 weekly-configuration sections */}

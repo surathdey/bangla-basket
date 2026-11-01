@@ -2688,6 +2688,59 @@ async def public_delivery_slots():
     return {"delivery_slots": _upcoming_delivery_slots(settings)}
 
 
+_WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+
+
+def _order_days_message(days: List[int]) -> str:
+    names = [_WEEKDAY_NAMES[d] for d in sorted(days)]
+    return "Weekly menu can be ordered on " + ", ".join(names) + "."
+
+
+async def _validate_weekly_order_days(snaps: List[dict]):
+    """Reject weekly-menu lines ordered on a day the menu's admin-set
+    order_days do not include (JS day numbers, Sunday=0). Menus without
+    order_days, or with an empty list, stay open every day — legacy menus
+    are unaffected. Packages resolve via their weekly_menu_id; à la carte
+    menu lines resolve via the current week's menu (same lookup as
+    /menu/current, including its latest-published fallback)."""
+    if not any(s.get("kind") in ("menu", "weekly_package") for s in snaps):
+        return
+    # JS day number: Python weekday is Mon=0..Sun=6, so shift by one.
+    js_day = (datetime.now(timezone.utc).astimezone(ZoneInfo("America/Toronto")).weekday() + 1) % 7
+    checked_current_week = False
+    for snap in snaps:
+        if snap.get("kind") == "weekly_package":
+            menu_id = snap.get("weekly_menu_id") or snap.get("ref_id")
+            if not menu_id:
+                continue
+            menu = await db.weekly_menus.find_one({"menu_id": menu_id}, {"_id": 0})
+        elif snap.get("kind") == "menu":
+            if checked_current_week:
+                continue
+            checked_current_week = True
+            week_start = _sunday_of(datetime.now(timezone.utc).date()).isoformat()
+            menu = await db.weekly_menus.find_one(
+                {"week_start": week_start, "published": True, "status": {"$ne": "draft"}},
+                {"_id": 0},
+            )
+            if not menu:
+                cur = db.weekly_menus.find(
+                    {"published": True, "status": {"$ne": "draft"}}, {"_id": 0}
+                ).sort("week_start", -1).limit(1)
+                docs = await cur.to_list(1)
+                menu = docs[0] if docs else None
+        else:
+            continue
+        if not menu:
+            continue
+        days = menu.get("order_days")
+        if not days:
+            continue  # absent or empty = open all days
+        days = [d for d in days if isinstance(d, int) and 0 <= d <= 6]
+        if days and js_day not in days:
+            raise HTTPException(400, _order_days_message(days))
+
+
 @api.post("/orders")
 async def create_order(req: CreateOrderReq, request: Request, user: User = Depends(_current_user)):
     # Platform gate — if the Suparna Dey Platform flags this tenant as
@@ -2708,6 +2761,7 @@ async def create_order(req: CreateOrderReq, request: Request, user: User = Depen
     snaps, subtotal = await _resolve_items(req.items, g_sc)
     settings = await _get_settings()
     _validate_delivery_slot(req.slot, settings, snaps)
+    await _validate_weekly_order_days(snaps)
     if not _valid_ca_postal(getattr(req.address, "postal_code", None)):
         raise HTTPException(400, "Please enter a valid Canadian postal code for delivery.")
     zone_err = await _out_of_zone_error_postal(getattr(req.address, "postal_code", None))
@@ -4718,6 +4772,9 @@ class WeeklyMenuSettingsReq(BaseModel):
     alacarte_enabled: Optional[bool] = None
     package_enabled: Optional[bool] = None
     package: Optional[WeeklyMenuPackage] = None
+    # Weekdays customers may order this menu, JS day numbers 0=Sunday..6=Saturday.
+    # Absent = open every day (legacy menus); empty list is also treated as open.
+    order_days: Optional[List[int]] = None
 
 
 @api.post("/admin/menus/{week_start}/settings")
@@ -4734,6 +4791,9 @@ async def admin_update_weekly_settings(week_start: str, req: WeeklyMenuSettingsR
         patch["package_enabled"] = req.package_enabled
     if req.package is not None:
         patch["package"] = req.package.model_dump()
+    if req.order_days is not None:
+        # JS day numbers only; out-of-range values dropped, deduped, sorted.
+        patch["order_days"] = sorted({d for d in req.order_days if 0 <= d <= 6})
     if not patch:
         return {"ok": True, "unchanged": True}
     # Safety: don't allow both toggles off (customer would see nothing)

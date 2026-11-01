@@ -52,8 +52,14 @@ type WeeklyPkg = {
 type WeeklyMenu = {
   menu_id: string; title: string; package_enabled?: boolean; package?: WeeklyPkg | null;
   alacarte_enabled?: boolean;
+  order_days?: number[];  // JS day numbers 0=Sunday..6=Saturday; absent/empty = open every day
   items: MenuItem[]; complimentary_items?: MenuItem[];
 };
+
+/** JS day numbers, Sunday=0..Saturday=6 — matches the backend order_days field. */
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const formatOrderDays = (days: number[]) =>
+  [...new Set(days)].filter(d => d >= 0 && d <= 6).sort((a, b) => a - b).map(d => WEEKDAY_NAMES[d]).join(", ");
 
 export default function ShopMealPlans() {
   const { width } = useWindowDimensions();
@@ -83,6 +89,12 @@ export default function ShopMealPlans() {
   const pkg = menu?.package;
   const isComp = pkg?.pricing_mode === "composition";
   const build = () => menu && router.push(`/menu/package/${menu.menu_id}?from=shop`);
+
+  // Order-days gate: when the admin set order_days on this menu and today
+  // (device-local weekday) is not one of them, the menu is closed — no
+  // dishes, no order CTAs, only the closed notice. Absent/empty = open.
+  const orderDays = menu?.order_days;
+  const isClosedToday = !!orderDays && orderDays.length > 0 && !orderDays.includes(new Date().getDay());
 
   // Fixed bundle: flat price, pick_count == every dish, max 1 each — the
   // bundle IS all dishes, so there is nothing to pick. The page itself
@@ -205,7 +217,7 @@ export default function ShopMealPlans() {
               <Text style={styles.heroSub}>
                 Build your own combo from this week&apos;s home-style Bengali menu — choose veg, non-veg or a mix.
               </Text>
-              {pkg && (
+              {pkg && !isClosedToday && (
                 <TouchableOpacity testID="mp-hero-build" style={styles.ctaPrimary} onPress={primaryAction}>
                   <Text style={styles.ctaPrimaryText}>{primaryLabel}</Text>
                   <Ionicons name="arrow-forward" size={18} color="#fff" />
@@ -217,6 +229,16 @@ export default function ShopMealPlans() {
 
         {loading ? (
           <ActivityIndicator color={BLUE} size="large" style={{ marginTop: 60 }} />
+        ) : isClosedToday ? (
+          <View testID="mp-closed-days" style={[styles.section, { width: contentWidth, alignItems: "center", paddingTop: 60 }]}>
+            <Ionicons name="calendar-outline" size={40} color={MUTE} />
+            <Text style={styles.emptyTitle}>Weekly menu is closed for ordering today.</Text>
+            <Text style={styles.emptySub}>Weekly menu can be ordered on {formatOrderDays(orderDays || [])}.</Text>
+            <TouchableOpacity style={styles.ctaPrimary} onPress={() => router.push("/shop/browse")}>
+              <Text style={styles.ctaPrimaryText}>Shop groceries</Text>
+              <Ionicons name="arrow-forward" size={18} color="#fff" />
+            </TouchableOpacity>
+          </View>
         ) : !pkg || !menu?.package_enabled ? (
           <View style={[styles.section, { width: contentWidth, alignItems: "center", paddingTop: 60 }]}>
             <Ionicons name="restaurant-outline" size={40} color={MUTE} />
