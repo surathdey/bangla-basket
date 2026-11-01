@@ -24,6 +24,8 @@ const NAV = [
   { key: "/admin/coupons", label: "Coupons", icon: "pricetags-outline" as const },
   { key: "/admin/orders", label: "Orders", icon: "bag-handle-outline" as const },
   { key: "/admin/customers", label: "Customers", icon: "person-circle-outline" as const },
+  { key: "/admin/whatsapp", label: "WhatsApp Inbox", icon: "chatbubble-outline" as const },
+  { key: "/admin/whatsapp-broadcast", label: "WhatsApp Broadcast", icon: "megaphone-outline" as const },
   { key: "/admin/delivery", label: "Delivery", icon: "bicycle-outline" as const },
   { key: "/admin/billing", label: "Billing", icon: "card-outline" as const },
   { key: "/admin/settings", label: "Settings", icon: "settings-outline" as const },

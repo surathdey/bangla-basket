@@ -89,3 +89,38 @@ async def send_test_sms(sid: str, encrypted_auth_token: str, from_number: str,
                         to_number: str) -> dict:
     body = "Bangla Basket test SMS — Twilio integration is working. Reply STOP to unsubscribe."
     return await send_sms(sid, encrypted_auth_token, from_number, to_number, body)
+
+
+def _wa_number(number: str) -> str:
+    """Normalize a stored E.164 number to Twilio's whatsapp: address form."""
+    n = (number or "").strip()
+    if n.lower().startswith("whatsapp:"):
+        n = n[len("whatsapp:"):]
+    return "whatsapp:" + n
+
+
+def _send_whatsapp_sync(sid: str, encrypted_auth_token: str, from_number: str,
+                        to_number: str, body: str) -> dict[str, Any]:
+    """Send one WhatsApp message via the Twilio Messages API.
+
+    NOTE: Twilio/Meta deliver a free-form body only inside the 24-hour
+    customer-service window (24h after the customer's last message). Outside
+    that window the body must match a Meta-approved template EXACTLY, or
+    Twilio/Meta rejects the send. Callers enforce the window; this function
+    just sends what it is given. Bodies are NOT truncated here — truncating
+    could silently break an approved template's exact text.
+    """
+    try:
+        client = _client(sid, encrypted_auth_token)
+        msg = client.messages.create(
+            body=body, from_=_wa_number(from_number), to=_wa_number(to_number))
+        return {"sid": msg.sid, "status": msg.status or "queued"}
+    except TwilioRestException as e:
+        raise _map_error(e)
+
+
+async def send_whatsapp(sid: str, encrypted_auth_token: str, from_number: str,
+                        to_number: str, body: str) -> dict:
+    return await asyncio.to_thread(
+        _send_whatsapp_sync, sid, encrypted_auth_token, from_number, to_number, body
+    )

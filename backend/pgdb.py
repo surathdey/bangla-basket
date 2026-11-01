@@ -92,6 +92,13 @@ TABLES = {
     "user_sessions": (["session_token"], ["created_at", "expires_at"]),
     "users": (["user_id"], ["created_at", "first_login_at"]),
     "weekly_menus": (["week_start"], ["created_at", "updated_at"]),
+    # WhatsApp module: inbound/outbound messages for the admin inbox +
+    # broadcast. message_id = Twilio MessageSid (inbound) or the returned
+    # SID for outbound sends. window_expires_at = last-customer-message
+    # time + 24h (the customer-service window for free-form replies).
+    "whatsapp_messages": (
+        ["message_id"], ["created_at", "window_expires_at"],
+    ),
 }
 
 # Fields that sort numerically when they appear in a sort spec.  Everything

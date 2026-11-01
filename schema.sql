@@ -250,3 +250,15 @@ CREATE TABLE IF NOT EXISTS weekly_menus (
     doc JSONB NOT NULL
 );
 CREATE INDEX IF NOT EXISTS weekly_menus_doc_gin ON weekly_menus USING GIN (doc);
+
+-- ------------------------------------------------------------ whatsapp_messages
+-- WhatsApp module (admin inbox + broadcast). One row per message;
+-- message_id is the Twilio MessageSid (inbound and outbound).
+CREATE TABLE IF NOT EXISTS whatsapp_messages (
+    message_id TEXT PRIMARY KEY,
+    seq BIGSERIAL,
+    doc JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS whatsapp_messages_doc_gin ON whatsapp_messages USING GIN (doc);
+CREATE INDEX IF NOT EXISTS whatsapp_messages_phone_created
+    ON whatsapp_messages ((doc ->> 'from_phone'), (doc ->> 'created_at'));

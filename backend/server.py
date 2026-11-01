@@ -5120,6 +5120,16 @@ async def admin_get_integrations(admin=Depends(_current_admin)):
             "last_test_ok": twilio.get("last_test_ok"),
             "last_test_at": twilio.get("last_test_at"),
         },
+        # WhatsApp sender connection (full settings live in the WhatsApp
+        # section below; this block only mirrors the public summary here).
+        "whatsapp": {
+            "connected": bool((ints.get("whatsapp") or {}).get("auth_token_encrypted")
+                              and (ints.get("whatsapp") or {}).get("account_sid")),
+            "sender_phone": (ints.get("whatsapp") or {}).get("sender_phone", WA_DEFAULT_SENDER),
+            "waba_id": (ints.get("whatsapp") or {}).get("waba_id", WA_DEFAULT_WABA),
+            "account_sid": (ints.get("whatsapp") or {}).get("account_sid", ""),
+            "webhook_url": _wa_webhook_url(),
+        },
     }
 
 
@@ -5278,6 +5288,430 @@ async def admin_test_twilio(payload: TestSmsIn, admin=Depends(_current_admin)):
                   "integrations.twilio.last_test_error": ""}},
     )
     return {"ok": True, "message_sid": res["sid"], "status": res["status"]}
+
+
+# ==========================================================
+# WHATSAPP MODULE (Twilio WhatsApp) — admin inbox + broadcast
+# ==========================================================
+# QUICK SCOPE: no AI bot, no auto-reply, no template sync.
+# Two admin surfaces:
+#   * Inbox (/admin/whatsapp): conversations grouped by customer phone,
+#     thread view, reply box. Free-form replies are allowed ONLY inside
+#     the 24-hour customer-service window (24h after the customer's last
+#     message); outside it the backend rejects with 403 telling the admin
+#     to use an approved template instead (via Broadcast).
+#   * Broadcast (/admin/whatsapp-broadcast): pick customers, enter a
+#     template name + body, send ONLY to whatsapp_opt_in customers.
+#
+# IMPORTANT WhatsApp/Meta rules (enforced here AND shown in the UI):
+#   * A free-form body sent OUTSIDE the 24h window is rejected by
+#     Twilio/Meta unless the text matches a Meta-approved template
+#     EXACTLY. Template sync from the Twilio/Meta API is NOT built (out
+#     of scope) — the admin types the approved template name + the exact
+#     body text manually, and must substitute template variables into
+#     the body text before sending.
+#   * Broadcasts go ONLY to customers flagged whatsapp_opt_in (default
+#     false). Sending marketing to non-opted-in numbers risks Meta
+#     banning the sender.
+#
+# Sender identity is UI-configurable (Admin → Settings → WhatsApp), never
+# hardcoded in send logic: the values below are DEFAULTS shown until the
+# admin saves their own. Today the sender is Bong Hneshel's approved
+# WhatsApp sender; the owners' own sender replaces it later via Settings.
+# Credentials (Twilio Account SID + Auth Token) live ENCRYPTED in
+# business_settings.integrations.whatsapp (Fernet, INTEGRATIONS_FERNET_KEY)
+# and are NEVER returned by any endpoint, never logged, never in git.
+# Until credentials are saved, every send endpoint fails gracefully with
+# "sender not connected" — nothing is ever sent to a real number.
+from settings_crypto import decrypt_str as _wa_decrypt
+
+WA_DEFAULT_SENDER = "+12495040015"  # Bong Hneshel's approved sender (for now)
+WA_DEFAULT_WABA = "1583482316256857"
+WA_WINDOW_HOURS = 24
+WA_BROADCAST_MAX = 100
+WA_BODY_MAX = 4000
+
+
+def _wa_now():
+    return datetime.now(timezone.utc)
+
+
+def _wa_as_dt(value):
+    """Parse a stored ISO string (or pass through a datetime) or None."""
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    return None
+
+
+def _wa_norm_phone(raw) -> str:
+    """Strip Twilio's 'whatsapp:' prefix + spaces/dashes from a phone."""
+    phone = (raw or "").strip()
+    if phone.lower().startswith("whatsapp:"):
+        phone = phone[len("whatsapp:"):]
+    return phone.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+
+
+def _wa_valid_e164(phone: str) -> bool:
+    return (phone.startswith("+") and len(phone) >= 8
+            and phone[1:].isdigit())
+
+
+async def _wa_settings() -> dict:
+    """WhatsApp sender config: saved values merged over the defaults."""
+    doc = await db.business_settings.find_one({"key": "default"}, {"_id": 0}) or {}
+    wa = ((doc.get("integrations") or {}).get("whatsapp") or {})
+    return {
+        "sender_phone": wa.get("sender_phone") or WA_DEFAULT_SENDER,
+        "waba_id": wa.get("waba_id") or WA_DEFAULT_WABA,
+        "account_sid": wa.get("account_sid") or "",
+        "auth_token_encrypted": wa.get("auth_token_encrypted") or "",
+    }
+
+
+def _wa_connected(cfg: dict) -> bool:
+    return bool(cfg.get("account_sid") and cfg.get("auth_token_encrypted"))
+
+
+def _wa_webhook_url() -> str:
+    """Exact public URL the admin pastes into the Twilio console."""
+    base = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
+    return f"{base}/api/whatsapp/webhook" if base else ""
+
+
+def _wa_signature_valid(token: str, url: str, params: dict, signature: str) -> bool:
+    """Twilio X-Twilio-Signature: base64(HMAC-SHA1(token, url + sorted k+v))."""
+    data = url + "".join(k + v for k, v in sorted(params.items()))
+    digest = _hmac.new(token.encode(), data.encode(), _hashlib.sha1).digest()
+    expected = _b64.b64encode(digest).decode()
+    return _hmac.compare_digest(expected, signature)
+
+
+async def _wa_last_inbound(phone: str):
+    cur = db.whatsapp_messages.find(
+        {"from_phone": phone, "direction": "inbound"}, {"_id": 0}
+    ).sort("created_at", -1).limit(1)
+    rows = await cur.to_list(1)
+    return rows[0] if rows else None
+
+
+async def _wa_window(phone: str):
+    """(window_open, window_expires_at) for a customer phone."""
+    row = await _wa_last_inbound(phone)
+    if not row:
+        return False, None
+    exp = _wa_as_dt(row.get("window_expires_at"))
+    if exp is None:
+        created = _wa_as_dt(row.get("created_at"))
+        exp = created + timedelta(hours=WA_WINDOW_HOURS) if created else None
+    if exp is None:
+        return False, None
+    return _wa_now() < exp, exp
+
+
+async def _wa_customer_name(phone: str) -> str:
+    cur = db.users.find({}, {"_id": 0, "phone": 1, "name": 1}).sort("created_at", -1).limit(500)
+    for u in await cur.to_list(500):
+        if u.get("phone") and _wa_norm_phone(u["phone"]) == phone:
+            return u.get("name") or ""
+    return ""
+
+
+@api.post("/whatsapp/webhook")
+async def whatsapp_webhook(request: Request):
+    """Twilio inbound webhook (PUBLIC — Twilio calls it, not the admin).
+
+    Twilio posts form-encoded fields (MessageSid, From, To, Body, ...).
+    When credentials are configured, the X-Twilio-Signature header is
+    validated (HMAC-SHA1 over the full public URL + sorted params); a
+    failed check is rejected 403 and nothing is stored. When no token is
+    configured yet, the message is accepted and a warning is logged —
+    TEMPORARY: tighten (require a token) once the sender is connected.
+    Delivery-status callbacks (MessageStatus, no Body) update the stored
+    outbound row instead of creating a message.
+    """
+    try:
+        form = await request.form()
+    except Exception:
+        raise HTTPException(400, "invalid form body")
+    params = {k: str(v) for k, v in form.items()}
+    sid = params.get("MessageSid", "")
+    if params.get("MessageStatus") and not params.get("Body"):
+        if sid:
+            await db.whatsapp_messages.update_one(
+                {"message_id": sid}, {"$set": {"status": params["MessageStatus"]}})
+        return {"ok": True}
+    body = (params.get("Body") or "").strip()
+    if not body and not sid:
+        return {"ok": True}  # ignore empty probes
+    cfg = await _wa_settings()
+    token = None
+    if cfg["auth_token_encrypted"]:
+        try:
+            token = _wa_decrypt(cfg["auth_token_encrypted"])
+        except Exception as e:
+            log.warning(f"WhatsApp webhook: token undecryptable, accepting unsigned: {e}")
+    if token:
+        url = _wa_webhook_url()
+        sig = request.headers.get("X-Twilio-Signature", "")
+        if not url or not sig or not _wa_signature_valid(token, url, params, sig):
+            log.warning("WhatsApp webhook: signature check failed, message rejected")
+            raise HTTPException(403, "Invalid Twilio signature")
+    else:
+        # No token configured yet: accept + warn (temporary, see docstring).
+        log.warning("WhatsApp webhook: accepted WITHOUT signature validation (no token configured)")
+    mid = sid or ("wa_in_" + _secrets.token_hex(8))
+    existing = await db.whatsapp_messages.find_one({"message_id": mid}, {"_id": 0})
+    if existing:
+        return {"ok": True, "duplicate": True}
+    now = _wa_now()
+    await db.whatsapp_messages.insert_one({
+        "message_id": mid,
+        "direction": "inbound",
+        "from_phone": _wa_norm_phone(params.get("From", "")),
+        "to_phone": _wa_norm_phone(params.get("To", "")),
+        "body": body[:WA_BODY_MAX],
+        "template_name": None,
+        "status": "received",
+        "created_at": now,
+        "window_expires_at": now + timedelta(hours=WA_WINDOW_HOURS),
+    })
+    return {"ok": True}
+
+
+class WhatsappSettingsIn(BaseModel):
+    sender_phone: str
+    waba_id: str
+    account_sid: str
+    auth_token: Optional[str] = ""
+
+
+@api.get("/admin/whatsapp/settings")
+async def whatsapp_settings(admin=Depends(_current_admin)):
+    """Sender connection status. NEVER returns secrets or ciphertext."""
+    cfg = await _wa_settings()
+    return {
+        "sender_phone": cfg["sender_phone"],
+        "waba_id": cfg["waba_id"],
+        "webhook_url": _wa_webhook_url(),
+        "connected": _wa_connected(cfg),
+        "crypto_ready": crypto_configured(),
+    }
+
+
+@api.put("/admin/whatsapp/settings")
+async def whatsapp_save_settings(payload: WhatsappSettingsIn,
+                                 admin=Depends(_current_admin)):
+    """Save the WhatsApp sender connection. The auth token is write-only:
+    an empty token keeps the previously saved one. Saved with a single-level
+    $set on 'integrations' (read-modify-write) so the save works even when
+    no whatsapp block exists yet (dotted $set no-ops on missing parents)."""
+    sender = _wa_norm_phone(payload.sender_phone)
+    if not _wa_valid_e164(sender):
+        raise HTTPException(400, "sender_phone must be E.164 (e.g. +12495040015)")
+    if not payload.waba_id.strip() or not payload.account_sid.strip():
+        raise HTTPException(400, "waba_id and account_sid are required")
+    if payload.auth_token and payload.auth_token.strip() and not crypto_configured():
+        raise HTTPException(500, "INTEGRATIONS_FERNET_KEY not configured on backend")
+    doc = await db.business_settings.find_one({"key": "default"}, {"_id": 0}) or {}
+    ints = dict(doc.get("integrations") or {})
+    wa = dict(ints.get("whatsapp") or {})
+    wa["sender_phone"] = sender
+    wa["waba_id"] = payload.waba_id.strip()
+    wa["account_sid"] = payload.account_sid.strip()
+    if payload.auth_token and payload.auth_token.strip():
+        wa["auth_token_encrypted"] = encrypt_str(payload.auth_token.strip())
+    ints["whatsapp"] = wa
+    await db.business_settings.update_one(
+        {"key": "default"}, {"$set": {"integrations": ints}}, upsert=True)
+    return {"ok": True}
+
+
+@api.get("/admin/whatsapp/conversations")
+async def whatsapp_conversations(admin=Depends(_current_admin)):
+    """Conversations grouped by customer phone, newest first."""
+    cur = db.whatsapp_messages.find({}, {"_id": 0}).sort("created_at", -1).limit(2000)
+    rows = await cur.to_list(2000)
+    users_cur = db.users.find({}, {"_id": 0, "phone": 1, "name": 1}).sort("created_at", -1).limit(500)
+    names: dict = {}
+    for u in await users_cur.to_list(500):
+        if u.get("phone"):
+            names.setdefault(_wa_norm_phone(u["phone"]), u.get("name") or "")
+    convs: dict = {}
+    for m in rows:
+        phone = m.get("from_phone") if m.get("direction") == "inbound" else m.get("to_phone")
+        phone = _wa_norm_phone(phone or "")
+        if not phone:
+            continue
+        entry = convs.get(phone)
+        if entry is None:
+            entry = {"phone": phone, "name": names.get(phone, ""),
+                     "last_body": m.get("body") or "",
+                     "last_at": m.get("created_at"),
+                     "last_direction": m.get("direction"),
+                     "window_expires_at": None, "window_open": False}
+            convs[phone] = entry
+        if m.get("direction") == "inbound" and entry["window_expires_at"] is None:
+            # Rows arrive newest-first, so the first inbound seen is the latest.
+            exp = _wa_as_dt(m.get("window_expires_at"))
+            if exp is None:
+                created = _wa_as_dt(m.get("created_at"))
+                exp = created + timedelta(hours=WA_WINDOW_HOURS) if created else None
+            entry["window_expires_at"] = exp
+    now = _wa_now()
+    for e in convs.values():
+        e["window_open"] = bool(e["window_expires_at"] and now < e["window_expires_at"])
+    return list(convs.values())
+
+
+@api.get("/admin/whatsapp/thread")
+async def whatsapp_thread(phone: str, admin=Depends(_current_admin)):
+    """Full thread for one customer phone + its 24h window state."""
+    phone = _wa_norm_phone(phone)
+    if not phone:
+        raise HTTPException(400, "phone is required")
+    rows = []
+    for field in ("from_phone", "to_phone"):
+        cur = db.whatsapp_messages.find({field: phone}, {"_id": 0}).sort("created_at", 1).limit(2000)
+        rows.extend(await cur.to_list(2000))
+    rows.sort(key=lambda m: str(m.get("created_at") or ""))
+    window_open, exp = await _wa_window(phone)
+    return {"phone": phone, "name": await _wa_customer_name(phone),
+            "window_open": window_open, "window_expires_at": exp,
+            "messages": rows}
+
+
+class WhatsappReplyIn(BaseModel):
+    to: str
+    body: str
+
+
+@api.post("/admin/whatsapp/reply")
+async def whatsapp_reply(payload: WhatsappReplyIn, admin=Depends(_current_admin)):
+    """Free-form reply. Enforced server-side: the 24h customer-service
+    window must be open, otherwise 403 (use an approved template instead)."""
+    to = _wa_norm_phone(payload.to)
+    body = (payload.body or "").strip()
+    if not _wa_valid_e164(to):
+        raise HTTPException(400, "to must be an E.164 phone number")
+    if not body:
+        raise HTTPException(400, "body is required")
+    if len(body) > WA_BODY_MAX:
+        raise HTTPException(400, f"body too long (max {WA_BODY_MAX} characters)")
+    cfg = await _wa_settings()
+    if not _wa_connected(cfg):
+        raise HTTPException(503, "WhatsApp sender not connected — save the Twilio Account SID + Auth Token in Admin → Settings → WhatsApp first")
+    window_open, exp = await _wa_window(to)
+    if not window_open:
+        raise HTTPException(403, "24-hour customer-service window expired (or no incoming message from this customer) — free-form replies are not allowed; send an approved template via Broadcast instead")
+    try:
+        res = await _twilio.send_whatsapp(
+            cfg["account_sid"], cfg["auth_token_encrypted"], cfg["sender_phone"], to, body)
+    except _twilio.TwilioError as e:
+        raise HTTPException(e.status, e.message)
+    await db.whatsapp_messages.insert_one({
+        "message_id": res["sid"], "direction": "outbound",
+        "from_phone": cfg["sender_phone"], "to_phone": to, "body": body,
+        "template_name": None, "status": res["status"],
+        "created_at": _wa_now(), "window_expires_at": exp,
+    })
+    return {"ok": True, "message_sid": res["sid"], "status": res["status"]}
+
+
+@api.get("/admin/whatsapp/opt-ins")
+async def whatsapp_opt_ins(admin=Depends(_current_admin)):
+    """WhatsApp opt-in flags by user_id (default false when absent)."""
+    cur = db.users.find({}, {"_id": 0, "user_id": 1, "whatsapp_opt_in": 1}).sort("created_at", -1).limit(500)
+    out = {}
+    for u in await cur.to_list(500):
+        if u.get("user_id"):
+            out[u["user_id"]] = bool(u.get("whatsapp_opt_in"))
+    return out
+
+
+class WhatsappOptInIn(BaseModel):
+    user_id: str
+    opt_in: bool
+
+
+@api.post("/admin/whatsapp/opt-in")
+async def whatsapp_opt_in(payload: WhatsappOptInIn, admin=Depends(_current_admin)):
+    """Mark a customer opted in/out of WhatsApp broadcasts."""
+    user = await db.users.find_one({"user_id": payload.user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(404, "Customer not found")
+    await db.users.update_one(
+        {"user_id": payload.user_id}, {"$set": {"whatsapp_opt_in": bool(payload.opt_in)}})
+    return {"ok": True, "user_id": payload.user_id, "whatsapp_opt_in": bool(payload.opt_in)}
+
+
+class WhatsappBroadcastIn(BaseModel):
+    template_name: str
+    body: str
+    customer_ids: List[str] = Field(default_factory=list)
+
+
+@api.post("/admin/whatsapp/broadcast")
+async def whatsapp_broadcast(payload: WhatsappBroadcastIn, admin=Depends(_current_admin)):
+    """Broadcast a template message. Sends ONLY to selected customers who
+    are flagged whatsapp_opt_in and have a valid phone; everyone else is
+    counted as skipped, never sent. The body MUST match a Meta-approved
+    template exactly (variables substituted into the text) or Twilio/Meta
+    rejects the send — template sync is not built (manual entry)."""
+    template_name = (payload.template_name or "").strip()
+    body = (payload.body or "").strip()
+    if not template_name:
+        raise HTTPException(400, "template_name is required")
+    if not body:
+        raise HTTPException(400, "body is required")
+    if len(body) > WA_BODY_MAX:
+        raise HTTPException(400, f"body too long (max {WA_BODY_MAX} characters)")
+    if not payload.customer_ids:
+        raise HTTPException(400, "Select at least one customer")
+    cfg = await _wa_settings()
+    if not _wa_connected(cfg):
+        raise HTTPException(503, "WhatsApp sender not connected — save the Twilio Account SID + Auth Token in Admin → Settings → WhatsApp first")
+    cur = db.users.find({"user_id": {"$in": payload.customer_ids}},
+                        {"_id": 0, "user_id": 1, "phone": 1, "whatsapp_opt_in": 1}).limit(500)
+    by_id = {u["user_id"]: u for u in await cur.to_list(500)}
+    recipients = []
+    skipped = 0
+    for uid in payload.customer_ids:
+        u = by_id.get(uid)
+        phone = _wa_norm_phone((u or {}).get("phone") or "")
+        if not u or not u.get("whatsapp_opt_in") or not _wa_valid_e164(phone):
+            skipped += 1
+            continue
+        recipients.append((uid, phone))
+    if not recipients:
+        raise HTTPException(400, "No opted-in recipients selected — only customers flagged WhatsApp opt-in receive broadcasts")
+    if len(recipients) > WA_BROADCAST_MAX:
+        raise HTTPException(400, f"Broadcast capped at {WA_BROADCAST_MAX} recipients per send")
+    sent = 0
+    failed = []
+    now = _wa_now()
+    for uid, phone in recipients:
+        try:
+            res = await _twilio.send_whatsapp(
+                cfg["account_sid"], cfg["auth_token_encrypted"], cfg["sender_phone"], phone, body)
+            await db.whatsapp_messages.insert_one({
+                "message_id": res["sid"], "direction": "outbound",
+                "from_phone": cfg["sender_phone"], "to_phone": phone, "body": body,
+                "template_name": template_name, "status": res["status"],
+                "created_at": now, "window_expires_at": None,
+            })
+            sent += 1
+        except _twilio.TwilioError as e:
+            failed.append({"user_id": uid, "phone": phone, "error": e.message})
+    return {"ok": True, "template_name": template_name, "sent": sent,
+            "failed": failed, "skipped_not_opted_in": skipped}
 
 
 # ==========================================================

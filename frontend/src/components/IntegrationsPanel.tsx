@@ -36,6 +36,13 @@ type State = {
     last_test_ok: boolean | null;
     last_test_at: string | null;
   };
+  whatsapp: {
+    connected: boolean;
+    sender_phone: string;
+    waba_id: string;
+    account_sid: string;
+    webhook_url: string;
+  };
 };
 
 export default function IntegrationsPanel() {
@@ -65,6 +72,14 @@ export default function IntegrationsPanel() {
   const [authToken, setAuthToken] = useState("");
   const [fromNumber, setFromNumber] = useState("");
 
+  // WhatsApp form fields (sender identity is configurable here, never hardcoded)
+  const [waSender, setWaSender] = useState("");
+  const [waWaba, setWaWaba] = useState("");
+  const [waSid, setWaSid] = useState("");
+  const [waToken, setWaToken] = useState("");
+  const [savingWa, setSavingWa] = useState(false);
+  const [waResult, setWaResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
   // Test-Twilio phone
   const [twilioTestTo, setTwilioTestTo] = useState("");
 
@@ -78,6 +93,9 @@ export default function IntegrationsPanel() {
       setUserEmail(r.data.google_drive.user_email || "");
       setSid(r.data.twilio.account_sid || "");
       setFromNumber(r.data.twilio.from_number || "");
+      setWaSender(r.data.whatsapp?.sender_phone || "");
+      setWaWaba(r.data.whatsapp?.waba_id || "");
+      setWaSid(r.data.whatsapp?.account_sid || "");
     }
     setLoading(false);
   };
@@ -155,6 +173,26 @@ export default function IntegrationsPanel() {
     if (r.ok) setTwilioTestResult({ ok: true, msg: `✓ Test SMS sent — status: ${r.data?.status || "queued"}` });
     else setTwilioTestResult({ ok: false, msg: r.error });
     await load();
+  };
+
+  const saveWa = async () => {
+    if (!waSender.trim() || !waWaba.trim() || !waSid.trim()) {
+      setWaResult({ ok: false, msg: "Sender phone, WABA ID and Account SID are required." });
+      return;
+    }
+    setSavingWa(true);
+    setWaResult(null);
+    const body: any = { sender_phone: waSender.trim(), waba_id: waWaba.trim(), account_sid: waSid.trim() };
+    if (waToken.trim()) body.auth_token = waToken.trim();
+    const r = await adminApi.put<any>("/admin/whatsapp/settings", body);
+    setSavingWa(false);
+    if (r.ok) {
+      setWaToken("");
+      setWaResult({ ok: true, msg: "✓ WhatsApp sender saved. Inbox replies + broadcasts use this sender." });
+      await load();
+    } else {
+      setWaResult({ ok: false, msg: r.error });
+    }
   };
 
   if (loading || !state) return <ActivityIndicator color={colors.primary} />;
@@ -374,6 +412,90 @@ export default function IntegrationsPanel() {
             <Ionicons name={twilioTestResult.ok ? "checkmark-circle" : "alert-circle"} size={16}
               color={twilioTestResult.ok ? colors.success : colors.danger} />
             <Text style={styles.testText}>{twilioTestResult.msg}</Text>
+          </View>
+        )}
+      </View>
+
+      {/* --------------- WhatsApp card (Twilio WhatsApp sender) --------------- */}
+      <View style={[styles.card, { borderLeftWidth: 4, borderLeftColor: "#25D366" }]}>
+        <View style={styles.headRow}>
+          <View style={[styles.brandDot, { backgroundColor: "#25D366" }]}>
+            <Ionicons name="logo-whatsapp" size={16} color="#fff" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.title}>WhatsApp · Twilio</Text>
+            <Text style={styles.desc}>
+              Inbox replies + broadcasts send from this WhatsApp sender. Messages send AS Bong Hneshel
+              until the owners&apos; own sender is connected — sender identity is configurable here,
+              never hardcoded.
+            </Text>
+          </View>
+          <StatusBadge configured={state.whatsapp?.connected || false} lastTestOk={null} />
+        </View>
+
+        <Text style={styles.label}>Sender phone (E.164)</Text>
+        <Text style={styles.helper}>The approved WhatsApp sender number. Customers see messages from this number.</Text>
+        <TextInput
+          testID="wa-sender" value={waSender} onChangeText={setWaSender}
+          placeholder="+12495040015"
+          autoCapitalize="none" keyboardType="phone-pad" style={styles.input}
+        />
+
+        <Text style={styles.label}>WABA ID</Text>
+        <Text style={styles.helper}>WhatsApp Business Account ID from the Twilio console (display only, used for reference).</Text>
+        <TextInput
+          testID="wa-waba" value={waWaba} onChangeText={setWaWaba}
+          placeholder="1583482316256857"
+          autoCapitalize="none" keyboardType="number-pad" style={styles.input}
+        />
+
+        <Text style={styles.label}>Account SID</Text>
+        <Text style={styles.helper}>Twilio account that owns the sender above. Starts with &quot;AC&quot;.</Text>
+        <TextInput
+          testID="wa-sid" value={waSid} onChangeText={setWaSid}
+          placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          autoCapitalize="none" style={styles.input}
+        />
+
+        <Text style={styles.label}>Auth token</Text>
+        <Text style={styles.helper}>
+          {state.whatsapp?.connected ? "Currently configured. Enter a new token to replace, or leave blank." : "Auth token (kept secret, stored encrypted). Reveal in Twilio Console."}
+        </Text>
+        <TextInput
+          testID="wa-token" value={waToken} onChangeText={setWaToken}
+          placeholder={state.whatsapp?.connected ? "•••• configured ••••" : "your auth token"}
+          autoCapitalize="none" secureTextEntry
+          style={styles.input}
+        />
+
+        <Text style={styles.label}>Incoming-messages webhook URL</Text>
+        <Text style={styles.helper}>
+          Paste this into Twilio Console → Messaging → Senders → WhatsApp senders → your sender →
+          Webhook URL for incoming messages. Optionally set the same URL as the Status callback to track delivery.
+        </Text>
+        <TextInput
+          testID="wa-webhook-url" value={state.whatsapp?.webhook_url || ""}
+          editable={false}
+          autoCapitalize="none" style={styles.input}
+        />
+
+        <Text style={styles.helper}>
+          Broadcasts need a Meta-approved template: the body must match it exactly, or Twilio/Meta rejects
+          the send. Template sync is not built yet — enter template names manually on the Broadcast screen.
+        </Text>
+
+        <View style={styles.btnRow}>
+          <TouchableOpacity testID="wa-save" onPress={saveWa} disabled={savingWa} style={[styles.btnPrimary, savingWa && { opacity: 0.6 }]}>
+            {savingWa ? <ActivityIndicator color="#fff" size="small" /> :
+              <><Ionicons name="save-outline" size={14} color="#fff" /><Text style={styles.btnPrimaryText}>Save</Text></>}
+          </TouchableOpacity>
+        </View>
+
+        {waResult && (
+          <View style={[styles.testBanner, waResult.ok ? styles.testOk : styles.testFail]}>
+            <Ionicons name={waResult.ok ? "checkmark-circle" : "alert-circle"} size={16}
+              color={waResult.ok ? colors.success : colors.danger} />
+            <Text style={styles.testText}>{waResult.msg}</Text>
           </View>
         )}
       </View>
