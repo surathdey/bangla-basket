@@ -5807,6 +5807,190 @@ async def whatsapp_broadcast(payload: WhatsappBroadcastIn, admin=Depends(_curren
 
 
 # ==========================================================
+# STANDALONE WHATSAPP VIEW (owner, via one private link)
+# ==========================================================
+# View-only page that looks like the WhatsApp app: chat list + threads.
+# NOT behind admin login — protected by a bearer token stored as the
+# top-level business_settings field whatsapp_view_token (set once by the
+# operator). Anyone with the link can read the business's WhatsApp
+# messages, so the link must stay private; setting a new token kills an
+# old link. No reply/send here on purpose — replies stay in Admin inbox.
+async def _wa_view_doc() -> dict:
+    return await db.business_settings.find_one({"key": "default"}, {"_id": 0}) or {}
+
+
+def _wa_view_token_ok(doc: dict, token: str) -> bool:
+    saved = str(doc.get("whatsapp_view_token") or "")
+    return bool(saved) and bool(token) and _hmac.compare_digest(saved, token)
+
+
+def _wa_view_iso(value):
+    return value.isoformat() if hasattr(value, "isoformat") else str(value or "")
+
+
+@api.get("/whatsapp-view/threads")
+async def whatsapp_view_threads(token: str = ""):
+    doc = await _wa_view_doc()
+    if not _wa_view_token_ok(doc, token):
+        raise HTTPException(403, "invalid link")
+    cur = db.whatsapp_messages.find({}, {"_id": 0}).sort("created_at", -1).limit(2000)
+    rows = await cur.to_list(2000)
+    users_cur = db.users.find({}, {"_id": 0, "phone": 1, "name": 1}).sort("created_at", -1).limit(500)
+    names: dict = {}
+    for u in await users_cur.to_list(500):
+        if u.get("phone"):
+            names.setdefault(_wa_norm_phone(u["phone"]), u.get("name") or "")
+    convs: dict = {}
+    for m in rows:
+        phone = m.get("from_phone") if m.get("direction") == "inbound" else m.get("to_phone")
+        phone = _wa_norm_phone(phone or "")
+        if not phone:
+            continue
+        if phone not in convs:
+            convs[phone] = {"phone": phone, "name": names.get(phone, ""),
+                            "last_body": m.get("body") or "",
+                            "last_at": _wa_view_iso(m.get("created_at")),
+                            "last_direction": m.get("direction") or ""}
+    return list(convs.values())
+
+
+@api.get("/whatsapp-view/thread")
+async def whatsapp_view_thread(phone: str, token: str = ""):
+    doc = await _wa_view_doc()
+    if not _wa_view_token_ok(doc, token):
+        raise HTTPException(403, "invalid link")
+    phone = _wa_norm_phone(phone)
+    if not phone:
+        raise HTTPException(400, "phone is required")
+    rows = []
+    for field in ("from_phone", "to_phone"):
+        cur = db.whatsapp_messages.find({field: phone}, {"_id": 0}).sort("created_at", 1).limit(2000)
+        rows.extend(await cur.to_list(2000))
+    rows.sort(key=lambda m: str(m.get("created_at") or ""))
+    return {"phone": phone, "name": await _wa_customer_name(phone),
+            "messages": [{"direction": m.get("direction") or "",
+                          "body": m.get("body") or "",
+                          "created_at": _wa_view_iso(m.get("created_at"))} for m in rows]}
+
+
+@api.get("/whatsapp-view")
+async def whatsapp_view_page():
+    from fastapi.responses import HTMLResponse
+    html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bangla Basket WhatsApp</title>
+<style>
+*{box-sizing:border-box}body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;background:#ECE5DD;color:#111}
+.bar{background:#075E54;color:#fff;padding:14px 16px;font-weight:800;font-size:18px;display:flex;justify-content:space-between;align-items:center}
+.bar button{background:#128C7E;color:#fff;border:0;padding:8px 14px;border-radius:999px;font-weight:700;cursor:pointer}
+.wrap{max-width:720px;margin:0 auto;background:#fff;min-height:100vh}
+.chat{display:flex;gap:12px;padding:12px 16px;border-bottom:1px solid #eee;cursor:pointer;align-items:center}
+.chat:active{background:#f0f2f5}
+.avatar{width:46px;height:46px;border-radius:50%;background:#25D366;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;flex-shrink:0}
+.cname{font-weight:700}.cphone{font-size:12px;color:#667781}.snippet{font-size:14px;color:#667781;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.ctime{font-size:11px;color:#667781;white-space:nowrap}
+.threadbar{background:#075E54;color:#fff;padding:12px 16px;display:flex;gap:12px;align-items:center}
+.threadbar button{background:none;color:#fff;border:0;font-size:22px;cursor:pointer}
+.threadbar .tname{font-weight:700}.threadbar .tphone{font-size:12px;opacity:.85}
+#messages{padding:12px 8px 24px;background:#ECE5DD;min-height:60vh}
+.msgrow{display:flex;margin:8px 0}.msgrow.in{justify-content:flex-start}.msgrow.out{justify-content:flex-end}
+.bubble{max-width:82%;padding:8px 12px;border-radius:12px;box-shadow:0 1px 1px rgba(0,0,0,.15);white-space:pre-wrap;word-break:break-word;font-size:15px}
+.msgrow.in .bubble{background:#fff}.msgrow.out .bubble{background:#DCF8C6}
+.mtime{font-size:11px;color:#667781;text-align:right;margin-top:4px}
+.note{text-align:center;color:#667781;font-size:12px;padding:16px}
+.err{color:#b42318;text-align:center;padding:24px;font-weight:700}
+</style></head><body>
+<div class="wrap">
+<div id="listView">
+<div class="bar"><span>Bangla Basket WhatsApp</span><button onclick="loadThreads()">Refresh</button></div>
+<div id="chatList"></div>
+<div id="listEmpty" class="note" style="display:none">No messages yet.</div>
+<div id="listErr" class="err" style="display:none">This link is no longer valid. Please ask for a fresh link.</div>
+</div>
+<div id="threadView" style="display:none">
+<div class="threadbar"><button onclick="goBack()">&#8592;</button><div><div class="tname" id="threadName"></div><div class="tphone" id="threadPhone"></div></div></div>
+<div id="messages"></div>
+<div class="note">View only &mdash; replies are sent from the Admin inbox.</div>
+</div>
+</div>
+<script>
+var token = new URLSearchParams(location.search).get('token') || '';
+var currentPhone = null, refreshTimer = null;
+function fmt(iso){ var d = new Date(iso); return isNaN(d) ? (iso || '') : d.toLocaleString(); }
+function initials(name, phone){
+  var s = (name || '').trim();
+  if (s) return s.charAt(0).toUpperCase();
+  var p = (phone || '').replace(/\\D/g, '');
+  return p.slice(-2) || '?';
+}
+function el(tag, cls, text){
+  var e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+async function loadThreads(){
+  var r = await fetch('/api/whatsapp-view/threads?token=' + encodeURIComponent(token));
+  var list = document.getElementById('chatList');
+  var err = document.getElementById('listErr');
+  var empty = document.getElementById('listEmpty');
+  list.innerHTML = ''; err.style.display = 'none'; empty.style.display = 'none';
+  if (!r.ok){ err.style.display = 'block'; return; }
+  var data = await r.json();
+  if (!data.length){ empty.style.display = 'block'; return; }
+  data.forEach(function(c){
+    var row = el('div', 'chat');
+    row.appendChild(el('div', 'avatar', initials(c.name, c.phone)));
+    var mid = el('div', ''); mid.style.flex = '1'; mid.style.minWidth = '0';
+    mid.appendChild(el('div', 'cname', c.name || c.phone));
+    mid.appendChild(el('div', 'cphone', c.name ? c.phone : ''));
+    mid.appendChild(el('div', 'snippet', (c.last_direction === 'outbound' ? 'You: ' : '') + (c.last_body || '')));
+    row.appendChild(mid);
+    row.appendChild(el('div', 'ctime', fmt(c.last_at)));
+    row.onclick = function(){ openThread(c.phone, c.name); };
+    list.appendChild(row);
+  });
+}
+async function loadThread(){
+  if (!currentPhone) return;
+  var r = await fetch('/api/whatsapp-view/thread?token=' + encodeURIComponent(token) + '&phone=' + encodeURIComponent(currentPhone));
+  if (!r.ok) return;
+  var data = await r.json();
+  document.getElementById('threadName').textContent = data.name || data.phone;
+  document.getElementById('threadPhone').textContent = data.phone;
+  var box = document.getElementById('messages');
+  box.innerHTML = '';
+  data.messages.forEach(function(m){
+    var row = el('div', 'msgrow ' + (m.direction === 'outbound' ? 'out' : 'in'));
+    var b = el('div', 'bubble', m.body);
+    b.appendChild(el('div', 'mtime', fmt(m.created_at)));
+    row.appendChild(b);
+    box.appendChild(row);
+  });
+  window.scrollTo(0, document.body.scrollHeight);
+}
+async function openThread(phone, name){
+  currentPhone = phone;
+  document.getElementById('threadName').textContent = name || phone;
+  document.getElementById('threadPhone').textContent = phone;
+  document.getElementById('listView').style.display = 'none';
+  document.getElementById('threadView').style.display = 'block';
+  await loadThread();
+  clearInterval(refreshTimer);
+  refreshTimer = setInterval(loadThread, 30000);
+}
+function goBack(){
+  clearInterval(refreshTimer);
+  currentPhone = null;
+  document.getElementById('threadView').style.display = 'none';
+  document.getElementById('listView').style.display = 'block';
+  loadThreads();
+}
+loadThreads();
+</script>
+</body></html>"""
+    return HTMLResponse(content=html)
+
+
+# ==========================================================
 # ADMIN — Orders export (download / drive / sms)
 # ==========================================================
 class OrdersExportReq(BaseModel):
