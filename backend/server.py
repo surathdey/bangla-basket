@@ -5809,12 +5809,13 @@ async def whatsapp_broadcast(payload: WhatsappBroadcastIn, admin=Depends(_curren
 # ==========================================================
 # STANDALONE WHATSAPP VIEW (owner, via one private link)
 # ==========================================================
-# View-only page that looks like the WhatsApp app: chat list + threads.
+# Page that looks like the WhatsApp app: chat list + threads + replies.
 # NOT behind admin login — protected by a bearer token stored as the
 # top-level business_settings field whatsapp_view_token (set once by the
-# operator). Anyone with the link can read the business's WhatsApp
-# messages, so the link must stay private; setting a new token kills an
-# old link. No reply/send here on purpose — replies stay in Admin inbox.
+# operator). Anyone with the link can read AND reply to the business's
+# WhatsApp messages, so the link must stay private; setting a new token
+# kills an old link. Replies use the admin-configured sender and enforce
+# the same 24h customer-service window as the Admin inbox.
 async def _wa_view_doc() -> dict:
     return await db.business_settings.find_one({"key": "default"}, {"_id": 0}) or {}
 
@@ -5867,10 +5868,55 @@ async def whatsapp_view_thread(phone: str, token: str = ""):
         cur = db.whatsapp_messages.find({field: phone}, {"_id": 0}).sort("created_at", 1).limit(2000)
         rows.extend(await cur.to_list(2000))
     rows.sort(key=lambda m: str(m.get("created_at") or ""))
+    window_open, exp = await _wa_window(phone)
     return {"phone": phone, "name": await _wa_customer_name(phone),
+            "window_open": window_open,
+            "window_expires_at": _wa_view_iso(exp),
             "messages": [{"direction": m.get("direction") or "",
                           "body": m.get("body") or "",
                           "created_at": _wa_view_iso(m.get("created_at"))} for m in rows]}
+
+
+class WhatsappViewReplyIn(BaseModel):
+    token: str = ""
+    to: str
+    body: str
+
+
+@api.post("/whatsapp-view/reply")
+async def whatsapp_view_reply(payload: WhatsappViewReplyIn):
+    """Free-form reply from the standalone view. Same rules as the Admin
+    inbox reply: bearer-token auth, 24h window enforced server-side,
+    sent from the admin-configured sender."""
+    doc = await _wa_view_doc()
+    if not _wa_view_token_ok(doc, payload.token):
+        raise HTTPException(403, "invalid link")
+    to = _wa_norm_phone(payload.to)
+    body = (payload.body or "").strip()
+    if not _wa_valid_e164(to):
+        raise HTTPException(400, "to must be an E.164 phone number")
+    if not body:
+        raise HTTPException(400, "body is required")
+    if len(body) > WA_BODY_MAX:
+        raise HTTPException(400, f"body too long (max {WA_BODY_MAX} characters)")
+    cfg = await _wa_settings()
+    if not _wa_connected(cfg):
+        raise HTTPException(503, "WhatsApp sender not connected — save the Twilio Account SID + Auth Token in Admin → Settings → WhatsApp first")
+    window_open, exp = await _wa_window(to)
+    if not window_open:
+        raise HTTPException(403, "24-hour customer-service window expired (or no incoming message from this customer) — free-form replies are not allowed; send an approved template via Broadcast instead")
+    try:
+        res = await _twilio.send_whatsapp(
+            cfg["account_sid"], cfg["auth_token_encrypted"], cfg["sender_phone"], to, body)
+    except _twilio.TwilioError as e:
+        raise HTTPException(e.status, e.message)
+    await db.whatsapp_messages.insert_one({
+        "message_id": res["sid"], "direction": "outbound",
+        "from_phone": cfg["sender_phone"], "to_phone": to, "body": body,
+        "template_name": None, "status": res["status"],
+        "created_at": _wa_now(), "window_expires_at": exp,
+    })
+    return {"ok": True, "message_sid": res["sid"], "status": res["status"]}
 
 
 @api.get("/whatsapp-view")
@@ -5897,6 +5943,11 @@ async def whatsapp_view_page():
 .mtime{font-size:11px;color:#667781;text-align:right;margin-top:4px}
 .note{text-align:center;color:#667781;font-size:12px;padding:16px}
 .err{color:#b42318;text-align:center;padding:24px;font-weight:700}
+#replyArea{position:sticky;bottom:0;background:#F0F2F5;padding:10px 12px;border-top:1px solid #ddd}
+#replyForm{display:flex;gap:8px;align-items:flex-end}
+#replyText{flex:1;font-size:16px;font-family:inherit;padding:10px 12px;border:1px solid #ccc;border-radius:12px;resize:none;outline:none}
+#replyForm button{background:#25D366;color:#fff;border:0;padding:12px 18px;border-radius:999px;font-weight:700;font-size:15px;cursor:pointer}
+#replyForm button:disabled{opacity:.5}
 </style></head><body>
 <div class="wrap">
 <div id="listView">
@@ -5908,7 +5959,15 @@ async def whatsapp_view_page():
 <div id="threadView" style="display:none">
 <div class="threadbar"><button onclick="goBack()">&#8592;</button><div><div class="tname" id="threadName"></div><div class="tphone" id="threadPhone"></div></div></div>
 <div id="messages"></div>
-<div class="note">View only &mdash; replies are sent from the Admin inbox.</div>
+<div id="replyArea" style="display:none">
+<div id="windowNote" class="note" style="display:none">The 24-hour reply window for this chat has closed. Free-form replies are not allowed now &mdash; send an approved template from the Admin inbox instead.</div>
+<div id="replyForm">
+<textarea id="replyText" rows="2" maxlength="4000" placeholder="Type a reply..."></textarea>
+<button id="replyBtn" onclick="sendReply()">Send</button>
+</div>
+<div id="replyErr" class="err" style="display:none"></div>
+<div id="replyOk" class="note" style="display:none;color:#075E54;font-weight:700">Sent.</div>
+</div>
 </div>
 </div>
 <script>
@@ -5949,10 +6008,19 @@ async function loadThreads(){
     list.appendChild(row);
   });
 }
-async function loadThread(){
+async function loadThread(doScroll){
   if (!currentPhone) return;
   var r = await fetch('/api/whatsapp-view/thread?token=' + encodeURIComponent(token) + '&phone=' + encodeURIComponent(currentPhone));
-  if (!r.ok) return;
+  var err = document.getElementById('replyErr');
+  if (!r.ok){
+    document.getElementById('replyArea').style.display = 'block';
+    document.getElementById('replyForm').style.display = 'none';
+    document.getElementById('windowNote').style.display = 'none';
+    err.textContent = 'Could not load this chat. The link may no longer be valid.';
+    err.style.display = 'block';
+    return;
+  }
+  err.style.display = 'none';
   var data = await r.json();
   document.getElementById('threadName').textContent = data.name || data.phone;
   document.getElementById('threadPhone').textContent = data.phone;
@@ -5965,7 +6033,11 @@ async function loadThread(){
     row.appendChild(b);
     box.appendChild(row);
   });
-  window.scrollTo(0, document.body.scrollHeight);
+  var ra = document.getElementById('replyArea');
+  ra.style.display = 'block';
+  document.getElementById('replyForm').style.display = data.window_open ? 'flex' : 'none';
+  document.getElementById('windowNote').style.display = data.window_open ? 'none' : 'block';
+  if (doScroll) window.scrollTo(0, document.body.scrollHeight);
 }
 async function openThread(phone, name){
   currentPhone = phone;
@@ -5973,9 +6045,39 @@ async function openThread(phone, name){
   document.getElementById('threadPhone').textContent = phone;
   document.getElementById('listView').style.display = 'none';
   document.getElementById('threadView').style.display = 'block';
-  await loadThread();
+  document.getElementById('replyErr').style.display = 'none';
+  document.getElementById('replyOk').style.display = 'none';
+  await loadThread(true);
   clearInterval(refreshTimer);
-  refreshTimer = setInterval(loadThread, 30000);
+  refreshTimer = setInterval(function(){ loadThread(false); }, 30000);
+}
+async function sendReply(){
+  var text = document.getElementById('replyText');
+  var body = text.value.trim();
+  if (!body || !currentPhone) return;
+  var btn = document.getElementById('replyBtn');
+  var err = document.getElementById('replyErr');
+  var ok = document.getElementById('replyOk');
+  err.style.display = 'none'; ok.style.display = 'none';
+  btn.disabled = true; btn.textContent = 'Sending...';
+  try {
+    var r = await fetch('/api/whatsapp-view/reply', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({token: token, to: currentPhone, body: body})});
+    var data = await r.json().catch(function(){ return {}; });
+    if (!r.ok){
+      var msg = (data.detail || 'Could not send. Please try again.');
+      if (msg === 'invalid link') msg = 'This link is no longer valid. Please ask for a fresh link.';
+      err.textContent = msg; err.style.display = 'block';
+    } else {
+      text.value = '';
+      ok.style.display = 'block';
+      setTimeout(function(){ ok.style.display = 'none'; }, 3000);
+      await loadThread(true);
+    }
+  } catch (e) {
+    err.textContent = 'Could not send. Please try again.';
+    err.style.display = 'block';
+  }
+  btn.disabled = false; btn.textContent = 'Send';
 }
 function goBack(){
   clearInterval(refreshTimer);
