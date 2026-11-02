@@ -6526,7 +6526,7 @@ table{{width:100%;border-collapse:collapse;margin-top:8px;font-size:14px}}th,td{
 @media print{{body{{margin:0}}.no-print{{display:none}}}}
 button{{background:var(--brand);color:#fff;border:0;padding:10px 16px;border-radius:999px;cursor:pointer;font-weight:800}}
 </style></head><body>
-<div class="head"><div><div class="brand">{BRAND_NAME}</div><div class="sub">{settings.get('kitchen_address','Greater Toronto Area · GTA')}</div></div>
+<div class="head"><div><div class="brand">{BRAND_NAME}</div><div class="sub">Bangla Basket Fulfillment Center</div></div>
 <div style="text-align:right"><span class="badge">INVOICE</span><h2>#{order_id[-6:].upper()}</h2><div class="sub">{(order['created_at'].isoformat() if hasattr(order['created_at'], 'isoformat') else str(order['created_at']))[:10]}</div></div></div>
 <div class="grid"><div class="card"><h3>BILL TO</h3><div><strong>{(user or {{}}).get('name','Guest')}</strong></div><div class="muted">{(user or {{}}).get('email','')}</div><div>{order.get('phone','')}</div></div>
 <div class="card"><h3>DELIVER TO</h3><div>{order['address'].get('line1','')}{', '+order['address']['line2'] if order['address'].get('line2') else ''}</div><div class="muted">{order['address'].get('city','')}, {order['address'].get('postal_code','')}</div><div>Slot: {order['slot'].get('window','').replace('_',' ')} · {order['slot'].get('date','')}</div></div></div>
