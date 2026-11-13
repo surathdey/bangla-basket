@@ -15,6 +15,9 @@ const CONTACT = { email: BRAND.support?.email || "hello@banglabasket.ca", phone:
 const HOURS = ["Mon – Fri: 9:00 AM – 8:00 PM", "Saturday: 9:00 AM – 6:00 PM", "Sunday: 10:00 AM – 4:00 PM"];
 const ADDRESS = ["Bangla Basket Fulfilment centre @ Mississauga", "3050 Confederation Parkway, Mississauga, ON L5B 3Z6"];
 
+// Shown on every shop page: product photos and brand names are illustrative only.
+const DISCLAIMER = "Pictures and Brand names are for graphical representation and reference purposes only. Actual products may vary from the displayed photos and/or brand names.";
+
 /** One shared, content-rich storefront footer used on every /shop page. */
 export function ShopFooter() {
   const { width } = useWindowDimensions();
@@ -86,6 +89,7 @@ export function ShopFooter() {
         <View style={styles.bottomBar}>
           <Text style={styles.copy}>© {new Date().getFullYear()} {BRAND.legalName || BRAND.name}. All rights reserved.</Text>
           <Text style={styles.copy}>All prices in CA$ (Canadian dollars).</Text>
+          <Text style={styles.disclaimer}>{DISCLAIMER}</Text>
         </View>
       </View>
     </View>
@@ -113,4 +117,5 @@ const styles = StyleSheet.create({
   rowText: { fontSize: 13, color: MUTE, lineHeight: 19, flexShrink: 1 },
   bottomBar: { borderTopWidth: 1, borderTopColor: "#F0E6D8", paddingTop: spacing.md, marginTop: spacing.sm, flexDirection: "row", justifyContent: "space-between", flexWrap: "wrap", gap: 6 },
   copy: { fontSize: 12, color: MUTE },
+  disclaimer: { fontSize: 11, color: MUTE, lineHeight: 16, flexBasis: "100%" },
 });
