@@ -12,6 +12,9 @@ import { buildOperatingHoursLabel } from "@/src/utils/format";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+const clampDay = (v: any, fallback: number) => { const n = parseInt(v, 10); return Number.isFinite(n) && n >= 0 && n <= 6 ? n : fallback; };
+const clampHour = (v: any, fallback: number) => { const n = parseInt(v, 10); return Number.isFinite(n) && n >= 0 && n <= 23 ? n : fallback; };
+
 type PaymentMethodConfig = {
   enabled: boolean;
   tax_enabled: boolean;
@@ -23,10 +26,19 @@ type PaymentMethodConfig = {
   instructions?: string;
 };
 
+type DeliveryCycle = {
+  label?: string;
+  delivery_day?: number;
+  cutoff_day?: number;
+  cutoff_hour?: number;
+  kinds?: string[];
+};
+
 type Settings = {
   business_name: string; kitchen_address: string; phone: string; email: string;
   operating_hours: string; delivery_areas: string[]; default_delivery_fee_cents: number;
   ordering_days?: number[]; delivery_days?: number[];
+  delivery_cycles?: DeliveryCycle[];
   minimum_order_cents: number; tax_enabled: boolean; tax_rate_bps: number; tax_label: string;
   currency: string; company_info: string;
   home_hero_tagline?: string;
@@ -91,6 +103,15 @@ export default function AdminSettings() {
       // Hydrate schedule defaults (backend used to not have these fields)
       if (!Array.isArray(r.data.ordering_days)) r.data.ordering_days = [0, 1, 2, 3, 4];
       if (!Array.isArray(r.data.delivery_days)) r.data.delivery_days = [5, 6];
+      // Delivery cycles drive the cart slots when present (empty = Delivery Days above).
+      if (!Array.isArray(r.data.delivery_cycles)) r.data.delivery_cycles = [];
+      r.data.delivery_cycles = r.data.delivery_cycles.map((c: any) => ({
+        label: typeof c?.label === "string" ? c.label : "",
+        delivery_day: clampDay(c?.delivery_day, 4),
+        cutoff_day: clampDay(c?.cutoff_day, 3),
+        cutoff_hour: clampHour(c?.cutoff_hour, 12),
+        kinds: Array.isArray(c?.kinds) ? c.kinds.filter((k: any) => k === "menu" || k === "grocery") : [],
+      }));
       // Keep operating_hours label in sync with the structured fields on load.
       r.data.operating_hours = buildOperatingHoursLabel(r.data.ordering_days, r.data.delivery_days);
       // Loyalty defaults ON for docs saved before the switch existed.
@@ -128,6 +149,13 @@ export default function AdminSettings() {
         .filter(t => t.max_km > 0)
         .sort((a, b) => a.max_km - b.max_km),
       delivery_fee_over_max_cents: Math.round((parseFloat(overStr) || 0) * 100),
+      delivery_cycles: (s.delivery_cycles || []).map(c => ({
+        label: (c.label || "").trim(),
+        delivery_day: clampDay(c.delivery_day, 4),
+        cutoff_day: clampDay(c.cutoff_day, 3),
+        cutoff_hour: clampHour(c.cutoff_hour, 12),
+        kinds: (c.kinds || []).filter(k => k === "menu" || k === "grocery"),
+      })),
     };
     const r = await adminApi.put("/admin/settings", body);
     setSaving(false);
@@ -402,7 +430,7 @@ export default function AdminSettings() {
           </View>
 
           <Text style={[styles.label, { marginTop: spacing.md }]}>DELIVERY DAYS</Text>
-          <Text style={styles.helperText}>Days when drivers deliver those orders. Shown as available slots at checkout.</Text>
+          <Text style={styles.helperText}>Days when drivers deliver those orders. Shown as available slots at checkout. Ignored while delivery cycles (below) exist.</Text>
           <View style={styles.dayRow}>
             {DAY_LABELS.map((lbl, idx) => {
               const on = (s.delivery_days || []).includes(idx);
@@ -423,6 +451,63 @@ export default function AdminSettings() {
               );
             })}
           </View>
+
+          <Text style={[styles.label, { marginTop: spacing.md }]}>DELIVERY CYCLES</Text>
+          <Text style={styles.helperText}>When at least one cycle exists, the cart shows slots from these cycles only — Delivery Days above are ignored. One cycle = one delivery day each week. Orders stop at the cutoff (day + hour, Toronto time).</Text>
+          {(s.delivery_cycles || []).length === 0 && (
+            <Text style={styles.helperText}>No cycles — slots come from Delivery Days above. Add a cycle to control the exact days, cutoffs and what each slot carries.</Text>
+          )}
+          {(s.delivery_cycles || []).map((c, i) => (
+            <View key={`cycle-${i}`} style={[styles.card, { gap: spacing.sm, backgroundColor: colors.surfaceAlt }]}>
+              <View style={styles.row}>
+                <Field label="Cycle name" testID={`cycle-label-${i}`} value={c.label || ""} onChange={t => setS({ ...s, delivery_cycles: (s.delivery_cycles || []).map((x, idx) => idx === i ? { ...x, label: t } : x) })} placeholder="e.g. Thursday Weekly Meals & Grocery" />
+                <TouchableOpacity testID={`cycle-remove-${i}`} onPress={() => setS({ ...s, delivery_cycles: (s.delivery_cycles || []).filter((_, idx) => idx !== i) })} style={styles.tierRemove}>
+                  <Ionicons name="trash-outline" size={18} color={colors.danger} />
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.label}>DELIVERY DAY</Text>
+              <View style={styles.dayRow}>
+                {DAY_LABELS.map((lbl, idx) => {
+                  const on = (c.delivery_day ?? 4) === idx;
+                  return (
+                    <TouchableOpacity key={`cyc-del-${i}-${idx}`} testID={`cycle-del-day-${i}-${idx}`} onPress={() => setS({ ...s, delivery_cycles: (s.delivery_cycles || []).map((x, j) => j === i ? { ...x, delivery_day: idx } : x) })} style={[styles.dayChip, on && styles.dayChipActiveAlt]}>
+                      <Text style={[styles.dayChipText, on && styles.dayChipTextActive]}>{lbl}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <Text style={styles.label}>ORDER CUTOFF — DAY</Text>
+              <View style={styles.dayRow}>
+                {DAY_LABELS.map((lbl, idx) => {
+                  const on = (c.cutoff_day ?? 3) === idx;
+                  return (
+                    <TouchableOpacity key={`cyc-cut-${i}-${idx}`} testID={`cycle-cut-day-${i}-${idx}`} onPress={() => setS({ ...s, delivery_cycles: (s.delivery_cycles || []).map((x, j) => j === i ? { ...x, cutoff_day: idx } : x) })} style={[styles.dayChip, on && styles.dayChipActive]}>
+                      <Text style={[styles.dayChipText, on && styles.dayChipTextActive]}>{lbl}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <View style={styles.row}>
+                <Field label="Cutoff hour (0–23, Toronto)" testID={`cycle-cut-hour-${i}`} value={String(c.cutoff_hour ?? 12)} keyboardType="number-pad" onChange={t => { const n = parseInt(t, 10); if (Number.isFinite(n)) setS({ ...s, delivery_cycles: (s.delivery_cycles || []).map((x, j) => j === i ? { ...x, cutoff_hour: Math.min(23, Math.max(0, n)) } : x) }); }} />
+              </View>
+              <Text style={styles.label}>THIS SLOT CARRIES</Text>
+              <View style={styles.dayRow}>
+                {(["menu", "grocery"] as const).map(kind => {
+                  const on = (c.kinds || []).includes(kind);
+                  return (
+                    <TouchableOpacity key={`cyc-kind-${i}-${kind}`} testID={`cycle-kind-${i}-${kind}`} onPress={() => setS({ ...s, delivery_cycles: (s.delivery_cycles || []).map((x, j) => j === i ? { ...x, kinds: on ? (x.kinds || []).filter(k => k !== kind) : [...(x.kinds || []), kind] } : x) })} style={[styles.dayChip, on && styles.dayChipActive]}>
+                      <Text style={[styles.dayChipText, on && styles.dayChipTextActive]}>{kind === "menu" ? "Weekly Meals" : "Groceries"}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <Text style={styles.helperText}>Leave both off = this slot carries everything. Weekly-meal carts only use slots with Weekly Meals ticked.</Text>
+            </View>
+          ))}
+          <TouchableOpacity testID="cycle-add" onPress={() => setS({ ...s, delivery_cycles: [...(s.delivery_cycles || []), { label: "", delivery_day: 4, cutoff_day: 3, cutoff_hour: 12, kinds: ["menu", "grocery"] }] })} style={styles.tierAdd}>
+            <Ionicons name="add" size={16} color={colors.primary} />
+            <Text style={styles.tierAddText}>Add cycle</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
