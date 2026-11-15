@@ -20,6 +20,7 @@ import { AddressAutocomplete, StructuredAddress } from "@/src/components/Address
 import { LocationBanner } from "@/src/components/LocationBanner";
 import { ShopHeader } from "@/src/components/ShopHeader";
 import { ShopFooter } from "@/src/components/ShopFooter";
+import { EmailAuthModal } from "@/src/components/EmailAuthModal";
 
 type PaymentSlug = "card" | "cod" | "paypal" | "interac";
 type PaymentMethodPublic = {
@@ -140,6 +141,12 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
   const [publicSettings, setPublicSettings] = useState<PublicSettings | null>(null);
   const [serverSlots, setServerSlots] = useState<{ date: string; window: string; label: string; cycle?: string; kinds?: string[] }[] | null>(null);
   const [interacBanner, setInteracBanner] = useState<{ email: string; instructions: string; amount: number; orderId: string } | null>(null);
+  // Guest 20%-off nudge: the welcome discount is for logged-in customers
+  // only. Shown once when a guest taps Place order; "Continue as guest"
+  // re-runs placeAndPay with the bypass set.
+  const [guestDiscountOpen, setGuestDiscountOpen] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const guestBypass = useRef(false);
 
   // Server slots are cycle-based and cutoff-filtered (unlike the legacy
   // client-side computation from delivery_days). A cart with weekly meals
@@ -147,6 +154,9 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
   // carts may use any slot. Falls back to the legacy computation if the
   // endpoint fails, so the cart never breaks.
   const hasMeal = items.some(i => i.kind === "menu" || i.kind === "weekly_package");
+  // The welcome discount's base excludes weekly meals, so a weekly-meal-only
+  // cart can never get 20% — the guest nudge must not promise it there.
+  const hasDiscountableItems = items.some(i => i.kind !== "menu" && i.kind !== "weekly_package");
   const slots = useMemo(
     () => {
       if (serverSlots) {
@@ -300,6 +310,16 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
       if (quote?.delivery_error) { Alert.alert("Delivery area", quote.delivery_error); return; }
       Alert.alert("Missing info", "Please add your name, delivery address, phone, a valid email and pick a slot."); return;
     }
+    // Guest checkout nudge: the 20% first-order discount is for logged-in
+    // customers only — a guest gets nothing. Stop here once so they can log
+    // in and save 20% on THIS order instead of finding out afterwards.
+    // Skipped when the cart can't earn the discount anyway (weekly-meal-only
+    // cart, or a discount already applied via a typed code).
+    if (user?.role === "guest" && hasDiscountableItems && !(quote && quote.discount_cents > 0) && !guestBypass.current) {
+      setGuestDiscountOpen(true);
+      return;
+    }
+    guestBypass.current = false;
     setPlacing(true);
     // Anonymous launch analytics — checkout started. Fire-and-forget: it
     // never blocks or delays the order call below.
@@ -414,6 +434,25 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
     }
   };
 
+  const continueAsGuest = () => {
+    setGuestDiscountOpen(false);
+    guestBypass.current = true;
+    placeAndPay();
+  };
+
+  const openLoginFromGuestPopup = () => {
+    setGuestDiscountOpen(false);
+    setAuthOpen(true);
+  };
+
+  const onAuthSuccessFromGuestPopup = async () => {
+    setAuthOpen(false);
+    await refresh();
+    // Re-quote as the logged-in customer so the 20% welcome discount shows
+    // in the Order summary before they place the order.
+    fetchQuote();
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       {!webShell && <LocationBanner topInset={insets.top} />}
@@ -448,6 +487,23 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
           </View>
         </View>
       )}
+      {guestDiscountOpen && (
+        <View style={styles.interacModalOverlay} testID="guest-discount-modal">
+          <View style={styles.guestModal}>
+            <Text style={styles.guestModalTitle}>Get 20% off — log in first</Text>
+            <Text style={styles.guestModalBody}>
+              You{"'"}re checking out as a guest, so the 20% first-order discount doesn{"'"}t apply. Log in now and it will apply to this order.
+            </Text>
+            <TouchableOpacity testID="guest-discount-login" style={styles.guestModalPrimary} onPress={openLoginFromGuestPopup}>
+              <Text style={styles.guestModalPrimaryText}>Log in</Text>
+            </TouchableOpacity>
+            <TouchableOpacity testID="guest-discount-continue" style={styles.guestModalSecondary} onPress={continueAsGuest}>
+              <Text style={styles.guestModalSecondaryText}>Continue as guest</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+      <EmailAuthModal visible={authOpen} onClose={() => setAuthOpen(false)} onSuccess={onAuthSuccessFromGuestPopup} />
       {webShell ? (
         <ShopHeader active="groceries" />
       ) : (
@@ -995,6 +1051,23 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6,
   },
   interacModalBtnText: { color: "#fff", fontWeight: "800", fontSize: 14 },
+  // Guest 20%-off nudge modal (shares the interac overlay)
+  guestModal: {
+    backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.sm,
+    width: "100%", maxWidth: 420,
+  },
+  guestModalTitle: { fontSize: 19, fontWeight: "900", color: colors.text },
+  guestModalBody: { fontSize: 14, color: colors.textMuted, lineHeight: 20, marginTop: 2 },
+  guestModalPrimary: {
+    marginTop: spacing.md, backgroundColor: colors.primary, paddingVertical: 13, borderRadius: radius.pill,
+    alignItems: "center", justifyContent: "center",
+  },
+  guestModalPrimaryText: { color: "#fff", fontWeight: "800", fontSize: 15 },
+  guestModalSecondary: {
+    backgroundColor: colors.surfaceAlt, paddingVertical: 13, borderRadius: radius.pill,
+    alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border,
+  },
+  guestModalSecondaryText: { color: colors.text, fontWeight: "800", fontSize: 15 },
 
   checkoutBar: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: colors.surface, paddingVertical: spacing.lg, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: colors.border, flexDirection: "row", alignItems: "center", gap: 8, ...shadows.card },
   checkoutHint: { color: colors.textMuted, fontSize: 11, letterSpacing: 2, fontWeight: "800" },
