@@ -5,7 +5,7 @@
   "email_from": "order@banglabasket.ca",
   "admin_email": "admin@bongconnekt.ca",
   "support_email": "support@bongconnekt.ca",
-  "guest_email_domain": "guest.bongconnekt.ca",
+  "guest_email_domain": "guest.banglabasket.ca",
   "delivery_admin_email": "delivery@bongconnekt.ca",
   "region": {
     "country": "CA",
