@@ -92,10 +92,14 @@ export default function ShopOrderScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [polling, setPolling] = useState(false);
   const [loyaltyEnabled, setLoyaltyEnabled] = useState(true);
+  // The order endpoint 404s for anyone but the order's owner (or an expired
+  // session) — without this the page spins forever on a failed load.
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const load = useCallback(async () => {
     const r = await api.get<Order>(`/orders/${id}`);
-    if (r.ok) setOrder(r.data);
+    if (r.ok) { setOrder(r.data); setLoadFailed(false); }
+    else setLoadFailed(true);
     const s = await api.get<{ loyalty_enabled?: boolean }>("/settings");
     if (s.ok) setLoyaltyEnabled(s.data?.loyalty_enabled !== false);
     setLoading(false);
@@ -188,7 +192,19 @@ export default function ShopOrderScreen() {
     return () => clearTimeout(t);
   }, [order?.order_id, liveDistM, tracking?.delivery_status]);
 
-  if (loading || !order) return <View style={styles.center}><ActivityIndicator color={colors.primary} size="large" /></View>;
+  if (loading) return <View style={styles.center}><ActivityIndicator color={colors.primary} size="large" /></View>;
+  if (!order) {
+    if (!loadFailed) return <View style={styles.center}><ActivityIndicator color={colors.primary} size="large" /></View>;
+    return (
+      <View style={[styles.center, { gap: 12, padding: 24 }]}>
+        <Text style={{ fontSize: 17, fontWeight: "800", color: colors.text, textAlign: "center" }}>Order not found</Text>
+        <Text style={{ fontSize: 14, color: colors.textMuted, textAlign: "center", lineHeight: 20 }}>This order belongs to a different account, or your session has expired. Log in with the account that placed the order and try again.</Text>
+        <TouchableOpacity testID="order-not-found-back" style={styles.notFoundBtn} onPress={() => router.replace("/shop/account")}>
+          <Text style={styles.notFoundBtnText}>Back to my account</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   // Determine current step index — timeline depends on payment method.
   // Card/Stripe has an extra "awaiting payment" step; COD + Interac are confirmed on placement so they share the same timeline.
@@ -465,6 +481,8 @@ function Row({ label, value, color, bold }: { label: string; value: string; colo
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.background },
+  notFoundBtn: { marginTop: 8, backgroundColor: colors.primary, paddingHorizontal: 22, paddingVertical: 13, borderRadius: radius.pill },
+  notFoundBtnText: { color: "#fff", fontWeight: "800", fontSize: 15 },
   header: { flexDirection: "row", alignItems: "center", padding: spacing.lg, borderBottomWidth: 1, borderBottomColor: colors.border },
   iconBtn: { width: 40, height: 40, borderRadius: radius.pill, backgroundColor: colors.surface, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border },
   headerId: { color: colors.textMuted, letterSpacing: 2, fontSize: 10, fontWeight: "800" },
