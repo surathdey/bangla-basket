@@ -92,7 +92,11 @@ export function ShopHeader({ active, navHandlers, showAnnounce = true }: Props) 
     <View style={styles.wrap}>
       {showRibbon && (
         <View style={[styles.announce, { paddingTop: insets.top }]} testID="shop-delivery-ribbon">
-          <Text style={styles.announceText} numberOfLines={1}>🚚  {ribbon.text}</Text>
+          <View style={styles.announceLines}>
+            {ribbon.text.split(/\s+•\s+|\n/).filter(Boolean).map((line, i) => (
+              <Text key={i} style={styles.announceText} numberOfLines={1}>{i === 0 ? `🚚  ${line}` : line}</Text>
+            ))}
+          </View>
         </View>
       )}
       <LocationBanner topInset={showRibbon ? 0 : insets.top} />
@@ -172,7 +176,8 @@ export function ShopHeader({ active, navHandlers, showAnnounce = true }: Props) 
 const styles = StyleSheet.create({
   wrap: { ...(Platform.OS === "web" ? { position: "sticky" as any, top: 0, zIndex: 30 } : {}) },
   announce: { backgroundColor: RED, alignItems: "center", justifyContent: "center", paddingVertical: 7, paddingHorizontal: spacing.lg },
-  announceText: { color: "#fff", fontSize: 12.5, fontWeight: "700", letterSpacing: 0.2 },
+  announceLines: { alignItems: "center" },
+  announceText: { color: "#fff", fontSize: 12.5, fontWeight: "700", letterSpacing: 0.2, textAlign: "center" },
 
   logoCircle: { backgroundColor: "#fff", borderColor: BLUE, alignItems: "center", justifyContent: "center", overflow: "hidden" },
 
