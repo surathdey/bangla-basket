@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, TextInput,
   KeyboardAvoidingView, Platform, ActivityIndicator, Alert,
@@ -130,6 +130,11 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
   const [redeemPoints, setRedeemPoints] = useState(0);
   const [instructions, setInstructions] = useState("");
   const [quote, setQuote] = useState<Quote | null>(null);
+  // Sequence guard for quote fetches: typing a postal code (or changing qty)
+  // fires a fetch per keystroke, and responses can arrive out of order — only
+  // the latest request may set the quote, or a stale partial-postal response
+  // (e.g. the $5.99 default fee) would overwrite the correct one.
+  const quoteSeq = useRef(0);
   const [placing, setPlacing] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<PaymentSlug>("cod");
   const [publicSettings, setPublicSettings] = useState<PublicSettings | null>(null);
@@ -263,6 +268,7 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
   const fetchQuote = async () => {
     if (items.length === 0) { setQuote(null); return; }
     if (!guestReady) return;
+    const mySeq = ++quoteSeq.current;
     const r = await api.post<Quote>("/orders/quote", {
       items: items.map(i => ({
         kind: i.kind, ref_id: i.ref_id, quantity: i.quantity,
@@ -283,6 +289,7 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
       redeem_points: redeemPoints,
       payment_method: paymentMethod,
     });
+    if (mySeq !== quoteSeq.current) return; // stale response — a newer quote request is already in flight
     if (r.ok) setQuote(r.data);
   };
 
@@ -828,7 +835,7 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
           <View style={[styles.checkoutBar, { paddingBottom: insets.bottom + 12, pointerEvents: "box-none" }]}>
             <View style={{ flexShrink: 0, pointerEvents: "none" }}>
               <Text style={styles.checkoutHint}>Total</Text>
-              <Text style={styles.checkoutTotal}>{centsToCAD(quote?.total_cents ?? subtotalCents)}</Text>
+              <Text style={styles.checkoutTotal}>{centsToCAD((quote?.total_cents ?? subtotalCents) - (quote && !postal.trim() ? quote.delivery_fee_cents : 0))}</Text>
             </View>
             <TouchableOpacity
               testID="cart-checkout"
