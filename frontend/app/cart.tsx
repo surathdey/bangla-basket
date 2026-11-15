@@ -46,6 +46,7 @@ type Quote = {
   points_notice?: string | null; points_consumed?: number;
   tax_cents?: number; tax_label?: string; tax_enabled?: boolean;
   delivery_distance_km?: number | null; delivery_fee_tier?: string;
+  free_delivery_threshold_cents?: number; free_delivery_remaining_cents?: number;
   delivery_time_window?: string; delivery_condo_policy?: string;
 };
 
@@ -773,6 +774,11 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
                       value={quote.delivery_fee_cents === 0 ? "FREE" : centsToCAD(quote.delivery_fee_cents)}
                       color={quote.delivery_fee_cents === 0 ? colors.success : undefined}
                     />
+                    {(quote.free_delivery_remaining_cents ?? 0) > 0 && quote.delivery_fee_cents > 0 && (
+                      <Text style={styles.freeDeliveryNudge} testID="cart-free-delivery-nudge">
+                        🚚 Add {centsToCAD(quote.free_delivery_remaining_cents ?? 0)} more for FREE delivery
+                      </Text>
+                    )}
                     {typeof quote.delivery_distance_km === "number" && (
                       <Text style={styles.feeHint} testID="cart-distance-hint">
                         ~{quote.delivery_distance_km} km from our Milton kitchen
@@ -917,6 +923,7 @@ const styles = StyleSheet.create({
 
   summaryBox: { backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border },
   feeHint: { fontSize: 11, color: colors.textMuted, marginTop: -4, marginBottom: 2 },
+  freeDeliveryNudge: { fontSize: 12.5, color: colors.success, fontWeight: "700", marginTop: 2, marginBottom: 2 },
   policyBox: { marginTop: spacing.sm, backgroundColor: colors.surfaceAlt, borderRadius: radius.md, padding: spacing.md, gap: 8 },
   policyRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
   policyText: { flex: 1, fontSize: 12, color: colors.text, lineHeight: 17 },

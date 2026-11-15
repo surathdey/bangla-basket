@@ -1942,14 +1942,19 @@ async def compute_delivery_fee(address, settings):
     return fee, round(km, 1), tier
 
 
+def _free_delivery_threshold(city: Optional[str], settings: dict) -> int:
+    """Free-delivery threshold in cents: standard threshold, or the higher
+    remote threshold for Barrie / London (and any cities the admin lists)."""
+    c = _norm_city(city)
+    remote = {_norm_city(x) for x in (settings.get("free_delivery_remote_cities") or ["Barrie", "London"])}
+    return int(settings.get("free_delivery_remote_threshold_cents", 25000) if c in remote
+               else settings.get("free_delivery_threshold_cents", 15000))
+
+
 def _free_delivery_applies(subtotal_cents: int, city: Optional[str], settings: dict) -> bool:
     """Free-delivery threshold: standard threshold, or the higher remote
     threshold for Barrie / London (and any cities the admin lists)."""
-    c = _norm_city(city)
-    remote = {_norm_city(x) for x in (settings.get("free_delivery_remote_cities") or ["Barrie", "London"])}
-    threshold = int(settings.get("free_delivery_remote_threshold_cents", 25000) if c in remote
-                    else settings.get("free_delivery_threshold_cents", 15000))
-    return subtotal_cents >= threshold
+    return subtotal_cents >= _free_delivery_threshold(city, settings)
 
 
 
@@ -2544,6 +2549,7 @@ async def order_quote(req: QuoteOrderReq, user: User = Depends(_current_user)):
         else:
             points_notice = f"Points capped at order value — {points_consumed} applied."
     delivery_fee, dist_km, fee_tier = await compute_delivery_fee(req.address, settings)
+    free_threshold = _free_delivery_threshold(getattr(req.address, "city", None), settings)
     if _free_delivery_applies(subtotal, getattr(req.address, "city", None), settings):
         delivery_fee, fee_tier = 0, "free_delivery"
     taxable = max(0, subtotal + delivery_fee - discount - ref_discount - points_redeem_cents)
@@ -2556,6 +2562,8 @@ async def order_quote(req: QuoteOrderReq, user: User = Depends(_current_user)):
         "delivery_fee_cents": delivery_fee,
         "delivery_distance_km": dist_km,
         "delivery_fee_tier": fee_tier,
+        "free_delivery_threshold_cents": free_threshold,
+        "free_delivery_remaining_cents": max(0, free_threshold - subtotal),
         "delivery_time_window": DELIVERY_TIME_WINDOW,
         "delivery_condo_policy": DELIVERY_CONDO_POLICY,
         "tax_cents": tax_cents,
