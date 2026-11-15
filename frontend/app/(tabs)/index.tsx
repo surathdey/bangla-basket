@@ -128,7 +128,11 @@ export default function HomeScreen() {
       {ribbon.enabled && !!ribbon.text && (
         <View style={[styles.ribbon, { paddingTop: (locBanner ? 6 : insets.top + 6) }]} testID="home-delivery-ribbon">
           <Ionicons name="bicycle" size={14} color="#fff" />
-          <Text style={styles.ribbonText} numberOfLines={1}>{ribbon.text}</Text>
+          <View style={styles.ribbonLines}>
+            {ribbon.text.split(/\s+•\s+|\n/).filter(Boolean).map((line, i) => (
+              <Text key={i} style={styles.ribbonText} numberOfLines={1}>{line}</Text>
+            ))}
+          </View>
         </View>
       )}
       <ScrollView
@@ -508,7 +512,8 @@ const styles = StyleSheet.create({
   heroTitle: { color: "#fff", fontSize: 30, fontWeight: "900", letterSpacing: -0.6, lineHeight: 34 },
   heroSubtitle: { color: "rgba(255,255,255,0.9)", fontSize: 14, lineHeight: 20, marginTop: 2, maxWidth: 340 },
   ribbon: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#D62828", paddingBottom: 8, paddingHorizontal: spacing.lg },
-  ribbonText: { color: "#fff", fontSize: 12.5, fontWeight: "800", letterSpacing: 0.2 },
+  ribbonLines: { flexShrink: 1, alignItems: "center" },
+  ribbonText: { color: "#fff", fontSize: 12.5, fontWeight: "800", letterSpacing: 0.2, textAlign: "center" },
   windowChip: {
     alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6,
     paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.pill, marginTop: 8,
