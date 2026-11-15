@@ -783,8 +783,14 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
                     <SumRow label="Subtotal" value={centsToCAD(quote.subtotal_cents)} />
                     <SumRow
                       label="Delivery fee"
-                      value={quote.delivery_fee_cents === 0 ? "FREE" : centsToCAD(quote.delivery_fee_cents)}
-                      color={quote.delivery_fee_cents === 0 ? colors.success : undefined}
+                      value={
+                        !postal.trim()
+                          ? centsToCAD(0)
+                          : quote.delivery_fee_cents === 0
+                            ? "FREE"
+                            : centsToCAD(quote.delivery_fee_cents)
+                      }
+                      color={!postal.trim() ? undefined : quote.delivery_fee_cents === 0 ? colors.success : undefined}
                     />
                     {typeof quote.delivery_distance_km === "number" && (
                       <Text style={styles.feeHint} testID="cart-distance-hint">
@@ -798,7 +804,7 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
                       <SumRow label={`${quote.tax_label || "Tax"} (${((quote.tax_cents / Math.max(1, quote.subtotal_cents + quote.delivery_fee_cents - quote.discount_cents - (quote.referral_discount_cents || 0) - quote.points_redeemed_cents)) * 100).toFixed(0)}%)`} value={centsToCAD(quote.tax_cents)} />
                     )}
                     <View style={styles.hr} />
-                    <SumRow label="Total" value={centsToCAD(quote.total_cents)} bold />
+                    <SumRow label="Total" value={centsToCAD(quote.total_cents - (!postal.trim() ? quote.delivery_fee_cents : 0))} bold />
                   </View>
                   <View style={styles.policyBox} testID="cart-delivery-policy">
                     <View style={styles.policyRow}>
