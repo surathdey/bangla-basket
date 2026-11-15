@@ -555,6 +555,18 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
                 })}
               </View>
 
+              {quote && (quote.free_delivery_remaining_cents ?? 0) > 0 && quote.delivery_fee_cents > 0 && (
+                <TouchableOpacity
+                  testID="cart-free-delivery-nudge"
+                  onPress={() => router.push(webShell ? "/shop/browse" : "/(tabs)/groceries")}
+                  style={styles.freeDeliveryNudgeRow}
+                >
+                  <Text style={styles.freeDeliveryNudge}>
+                    🚚 Add {centsToCAD(quote.free_delivery_remaining_cents ?? 0)} more for FREE delivery ›
+                  </Text>
+                </TouchableOpacity>
+              )}
+
               {svc?.enabled && needsFishService && !serviceLine && (
                 <View style={styles.serviceCard} testID="recommended-service">
                   <View style={styles.serviceIcon}><Ionicons name="sparkles" size={20} color={colors.primary} /></View>
@@ -774,11 +786,6 @@ export function CheckoutScreen({ webShell = false }: { webShell?: boolean }) {
                       value={quote.delivery_fee_cents === 0 ? "FREE" : centsToCAD(quote.delivery_fee_cents)}
                       color={quote.delivery_fee_cents === 0 ? colors.success : undefined}
                     />
-                    {(quote.free_delivery_remaining_cents ?? 0) > 0 && quote.delivery_fee_cents > 0 && (
-                      <Text style={styles.freeDeliveryNudge} testID="cart-free-delivery-nudge">
-                        🚚 Add {centsToCAD(quote.free_delivery_remaining_cents ?? 0)} more for FREE delivery
-                      </Text>
-                    )}
                     {typeof quote.delivery_distance_km === "number" && (
                       <Text style={styles.feeHint} testID="cart-distance-hint">
                         ~{quote.delivery_distance_km} km from our Milton kitchen
@@ -923,7 +930,8 @@ const styles = StyleSheet.create({
 
   summaryBox: { backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border },
   feeHint: { fontSize: 11, color: colors.textMuted, marginTop: -4, marginBottom: 2 },
-  freeDeliveryNudge: { fontSize: 12.5, color: colors.success, fontWeight: "700", marginTop: 2, marginBottom: 2 },
+  freeDeliveryNudge: { fontSize: 12.5, color: colors.success, fontWeight: "700", textDecorationLine: "underline" },
+  freeDeliveryNudgeRow: { marginTop: 8, marginBottom: 4, alignSelf: "flex-start", paddingVertical: 4 },
   policyBox: { marginTop: spacing.sm, backgroundColor: colors.surfaceAlt, borderRadius: radius.md, padding: spacing.md, gap: 8 },
   policyRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
   policyText: { flex: 1, fontSize: 12, color: colors.text, lineHeight: 17 },
