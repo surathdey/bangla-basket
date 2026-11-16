@@ -11,7 +11,10 @@ type RecentEvent = {
   type: string; ts: string | null; path?: string | null;
   item_id?: string | null; item_name?: string | null; qty?: number | null;
   session?: string | null;
+  source?: string | null; city?: string | null; region?: string | null; country?: string | null;
 };
+type SourceRow = { source: string; page_views: number };
+type RegionRow = { region: string; visitors: number };
 type DayRow = { date: string; sessions: number; page_views: number; cart_adds: number; orders: number };
 type HourRow = { hour: string; sessions: number; page_views: number; cart_adds: number; orders: number };
 type Health = {
@@ -23,8 +26,9 @@ type Health = {
 };
 type Summary = {
   days: number; window_start: string; window_end: string;
-  sessions: number; page_views: number; cart_views: number;
+  sessions: number; unique_visitors: number; page_views: number; cart_views: number;
   cart_adds: number; checkout_starts: number; orders: number;
+  by_source: SourceRow[]; by_region: RegionRow[];
   top_items: TopItem[]; recent: RecentEvent[]; daily: DayRow[]; hourly: HourRow[];
 };
 
@@ -131,6 +135,7 @@ export default function AdminAnalytics() {
         <>
           <View style={styles.grid}>
             <Stat testID="analytics-stat-sessions" icon="people-outline" label="SESSIONS" value={String(data.sessions)} color="#6d28d9" hint="Anonymous visitors" />
+            <Stat testID="analytics-stat-unique-visitors" icon="person-outline" label="UNIQUE VISITORS" value={String(data.unique_visitors ?? 0)} color="#0e7490" hint="Distinct hashed IPs" />
             <Stat testID="analytics-stat-page-views" icon="eye-outline" label="PAGE VIEWS" value={String(data.page_views)} color={colors.primary} hint="Shop pages viewed" />
             <Stat testID="analytics-stat-cart-views" icon="cart-outline" label="CART VIEWS" value={String(data.cart_views)} color={colors.secondary} hint="Reached cart / checkout" />
             <Stat testID="analytics-stat-cart-adds" icon="bag-add-outline" label="CART ADDS" value={String(data.cart_adds)} color={colors.accent} hint="Items added to carts" />
@@ -163,8 +168,48 @@ export default function AdminAnalytics() {
               Funnel: {data.sessions} sessions → {data.cart_views} viewed cart ({pct(data.cart_views, data.sessions)}) →{" "}
               {data.checkout_starts} started checkout ({pct(data.checkout_starts, data.cart_views)}) →{" "}
               {data.orders} orders ({pct(data.orders, data.checkout_starts)} of checkouts).
-              Sessions are anonymous — no names, emails, or personal data is ever collected here.
+              Sessions are anonymous — no names, emails, or personal data is ever collected here. IPs are stored only as one-way hashes, never in full.
             </Text>
+          </View>
+
+          <View style={styles.section} testID="analytics-by-source">
+            <Text style={styles.sectionTitle}>Traffic source (page views)</Text>
+            {(data.by_source ?? []).length === 0 ? (
+              <Text style={styles.emptyText}>No source data yet — older events were recorded before source tracking.</Text>
+            ) : (
+              <View>
+                <View style={[styles.row, styles.headerRow]}>
+                  <Text style={[styles.cell, styles.headerCell, styles.wideCell]}>Source</Text>
+                  <Text style={[styles.cell, styles.headerCell]}>Page views</Text>
+                </View>
+                {(data.by_source ?? []).map((s) => (
+                  <View key={s.source} style={styles.row}>
+                    <Text style={[styles.cell, styles.wideCell]}>{s.source}</Text>
+                    <Text style={styles.cell}>{s.page_views}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+
+          <View style={styles.section} testID="analytics-by-region">
+            <Text style={styles.sectionTitle}>Visitors by region</Text>
+            {(data.by_region ?? []).length === 0 ? (
+              <Text style={styles.emptyText}>No region data yet — it appears once a visitor&apos;s location is resolved.</Text>
+            ) : (
+              <View>
+                <View style={[styles.row, styles.headerRow]}>
+                  <Text style={[styles.cell, styles.headerCell, styles.wideCell]}>Region</Text>
+                  <Text style={[styles.cell, styles.headerCell]}>Visitors</Text>
+                </View>
+                {(data.by_region ?? []).map((r) => (
+                  <View key={r.region} style={styles.row}>
+                    <Text style={[styles.cell, styles.wideCell]}>{r.region}</Text>
+                    <Text style={styles.cell}>{r.visitors}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
 
           <View style={styles.section} testID="analytics-daily-chart">
@@ -222,7 +267,7 @@ export default function AdminAnalytics() {
                     <Text style={styles.cell}>{fmtTs(e.ts)}</Text>
                     <Text style={styles.cell}>{e.type}</Text>
                     <Text style={[styles.cell, styles.wideCell]} numberOfLines={1}>
-                      {e.type === "cart_add" ? `${e.item_name || e.item_id || "item"} × ${e.qty || 1}` : e.path || "—"}
+                      {e.type === "cart_add" ? `${e.item_name || e.item_id || "item"} × ${e.qty || 1}` : `${e.path || "—"}${e.source ? ` · ${e.source}` : ""}${e.city ? ` · ${e.city}` : ""}`}
                     </Text>
                     <Text style={styles.cell}>{e.session || "—"}</Text>
                   </View>

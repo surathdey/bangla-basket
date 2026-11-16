@@ -67,6 +67,17 @@ export function track(
     if (fields.item_id !== undefined) body.item_id = fields.item_id;
     if (fields.item_name !== undefined) body.item_name = fields.item_name;
     if (fields.qty !== undefined) body.qty = fields.qty;
+    // Web only: marketing query string + referrer, so the backend can
+    // derive the traffic source (Facebook vs organic vs direct). The
+    // backend keeps only the derived label — never the raw query string.
+    if (typeof window !== "undefined") {
+      try {
+        if (window.location.search) body.qs = window.location.search;
+        if (document.referrer) body.referrer = document.referrer;
+      } catch {
+        // Ignore — analytics must never break the app.
+      }
+    }
     fetch(`${base}/api/analytics/event`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

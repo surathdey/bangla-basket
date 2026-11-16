@@ -18,6 +18,9 @@ import uuid
 import re
 import shutil
 import httpx
+import hashlib
+import ipaddress
+from urllib.parse import parse_qs
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Any, Dict
@@ -4122,6 +4125,11 @@ async def admin_stats(admin=Depends(_current_admin)):
 # Names, emails, phones, addresses and any other personal data are never
 # accepted: the ingest endpoint whitelists exactly these fields and drops
 # everything else, so a chatty or hostile client cannot smuggle PII in.
+# Server-derived (never raw PII): ip_hash (SHA-256 of the visitor IP —
+# the raw IP is never stored, logged, or returned), source + campaign
+# (traffic source label derived from the marketing query string /
+# referrer — the raw query string is never stored), city / region /
+# country (GeoIP resolved once per hashed IP, cached in ip_geo_cache).
 _ANALYTICS_TYPES = {"page_view", "cart_view", "cart_add", "checkout_start", "search"}
 _ANALYTICS_DAYS = {1, 7, 30}
 _ANALYTICS_TZ = ZoneInfo("America/Toronto")
@@ -4138,20 +4146,124 @@ class _AnalyticsEventReq(BaseModel):
     item_id: Optional[str] = None
     item_name: Optional[str] = None
     qty: Optional[int] = None
+    # Marketing query string (e.g. "?fbclid=..&utm_source=fb") and the
+    # page referrer, auto-captured by the frontend on web. The backend
+    # keeps ONLY the derived source label + campaign (see
+    # _analytics_source) — the raw query string is never stored.
+    qs: Optional[str] = None
+    referrer: Optional[str] = None
+
+
+_ANALYTICS_IP_SALT = os.environ.get("ANALYTICS_IP_SALT", "bangla-basket-analytics-v1")
+_ANALYTICS_GEO_URL = "http://ip-api.com/json/{ip}?fields=status,country,regionName,city"
+
+
+def _analytics_ip_hash(request: Request) -> tuple[Optional[str], Optional[str]]:
+    """(ip_hash, raw_ip) for this request, or (None, None) when unknown.
+    nginx sits behind Docker's NAT, so request.client.host is the Docker
+    gateway (172.18.0.1) — useless. The real visitor IP arrives in
+    X-Forwarded-For (first entry); X-Real-IP is the gateway too, so it is
+    NOT used. The raw IP is returned only so the background GeoIP task
+    can resolve it in memory — it is never stored, logged, or returned."""
+    xff = request.headers.get("x-forwarded-for") or ""
+    first = xff.split(",")[0].strip()
+    if not first:
+        return None, None
+    try:
+        addr = ipaddress.ip_address(first)
+    except ValueError:
+        return None, None
+    if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved or addr.is_multicast:
+        return None, None
+    digest = hashlib.sha256(f"{_ANALYTICS_IP_SALT}:{first}".encode()).hexdigest()
+    return digest, first
+
+
+def _analytics_source(qs: Optional[str], referrer: Optional[str]) -> tuple[str, Optional[str]]:
+    """Traffic source label + campaign from the query string / referrer.
+    Only the derived label is kept — the raw query string is never stored,
+    so no other parameter can leak into analytics."""
+    params = parse_qs((qs or "").lstrip("?"))
+
+    def _one(name: str) -> str:
+        vals = params.get(name) or []
+        return (vals[0] if vals else "").strip()
+
+    utm_source = _one("utm_source").lower()
+    utm_medium = _one("utm_medium").lower()
+    campaign = _one("utm_campaign")[:128] or None
+    ref = (referrer or "").lower()
+    if utm_source in ("fb", "facebook"):
+        return ("facebook_paid" if utm_medium in ("paid", "cpc", "cpm") else "facebook_organic", campaign)
+    if utm_source in ("ig", "instagram"):
+        return ("instagram", campaign)
+    if utm_source == "google":
+        return ("google_paid" if utm_medium in ("cpc", "paid", "cpm") else "google_organic", campaign)
+    if _one("fbclid"):
+        return ("facebook", campaign)
+    if _one("gclid"):
+        return ("google_paid", campaign)
+    if _one("msclkid"):
+        return ("bing_paid", campaign)
+    if utm_source:
+        return (f"other:{utm_source}"[:32], campaign)
+    if "facebook.com" in ref:
+        return ("facebook", campaign)
+    if "instagram.com" in ref:
+        return ("instagram", campaign)
+    if "google." in ref:
+        return ("google_organic", campaign)
+    if ref:
+        return ("other", campaign)
+    return ("direct", campaign)
+
+
+async def _analytics_attach_geo(ip: str, ip_hash: str, eid: str) -> None:
+    """Best-effort GeoIP for one visitor IP. Runs after the event is
+    stored; the raw IP lives only in this task's memory and is never
+    logged or saved. Results are cached in ip_geo_cache keyed by the
+    hash, so each visitor is looked up once (free tier: 45 req/min)."""
+    try:
+        cached = await db.ip_geo_cache.find_one({"ip_hash": ip_hash})
+        if cached and cached.get("country"):
+            geo = {"city": cached.get("city") or "", "region": cached.get("region") or "", "country": cached.get("country") or ""}
+        else:
+            async with httpx.AsyncClient(timeout=5.0, trust_env=False) as client:
+                r = await client.get(_ANALYTICS_GEO_URL.format(ip=ip))
+            data = r.json() if r.status_code == 200 else {}
+            if data.get("status") != "success":
+                return
+            geo = {
+                "city": str(data.get("city") or "")[:128],
+                "region": str(data.get("regionName") or "")[:128],
+                "country": str(data.get("country") or "")[:128],
+            }
+            await db.ip_geo_cache.update_one(
+                {"ip_hash": ip_hash},
+                {"$set": {**geo, "ts": datetime.now(timezone.utc)}},
+                upsert=True,
+            )
+        patch = {k: v for k, v in geo.items() if v}
+        if patch:
+            await db.analytics_events.update_one({"eid": eid}, {"$set": patch})
+    except Exception:
+        return
 
 
 @api.post("/analytics/event")
-async def analytics_event(req: _AnalyticsEventReq):
+async def analytics_event(request: Request, req: _AnalyticsEventReq):
     """Public, unauthenticated ingest. Accepts ONLY the five known event
     types; anything else is a 400. Unknown body fields are ignored by the
     model AND never copied into the stored doc (whitelist below)."""
     if req.type not in _ANALYTICS_TYPES:
         raise HTTPException(400, f"unknown analytics type: {req.type}")
     session = (req.session or "").strip()[:128] or uuid.uuid4().hex
+    eid = uuid.uuid4().hex
     doc: Dict[str, Any] = {
         "type": req.type,
         "ts": datetime.now(timezone.utc),
         "session": session,
+        "eid": eid,
     }
     if req.path is not None:
         doc["path"] = str(req.path)[:512]
@@ -4165,7 +4277,16 @@ async def analytics_event(req: _AnalyticsEventReq):
         except (TypeError, ValueError):
             qty = 1
         doc["qty"] = max(1, min(999, qty))
+    ip_hash, raw_ip = _analytics_ip_hash(request)
+    if ip_hash:
+        doc["ip_hash"] = ip_hash
+    source, campaign = _analytics_source(req.qs, req.referrer)
+    doc["source"] = source
+    if campaign:
+        doc["campaign"] = campaign
     await db.analytics_events.insert_one(doc)
+    if raw_ip and ip_hash:
+        asyncio.create_task(_analytics_attach_geo(raw_ip, ip_hash, eid))
     return {"ok": True}
 
 
@@ -4219,6 +4340,9 @@ async def admin_analytics_summary(days: int = 7, admin=Depends(_current_admin)):
          "status": {"$ne": "pending_payment"}}).to_list()
 
     sessions: set = set()
+    visitors: set = set()
+    by_source: Dict[str, int] = {}
+    region_visitors: Dict[str, set] = {}
     top: Dict[str, Dict[str, Any]] = {}
     # Seed every day in the window so empty days render as 0, not missing.
     daily: Dict[str, Dict[str, Any]] = {}
@@ -4246,6 +4370,15 @@ async def admin_analytics_summary(days: int = 7, admin=Depends(_current_admin)):
         sess = e.get("session")
         if sess:
             sessions.add(sess)
+        ip_hash = e.get("ip_hash")
+        if ip_hash:
+            visitors.add(ip_hash)
+        if e.get("type") == "page_view":
+            src = e.get("source") or "unknown"
+            by_source[src] = by_source.get(src, 0) + 1
+        if ip_hash and (e.get("city") or e.get("country")):
+            label = ", ".join(p for p in [e.get("city"), e.get("region")] if p) or str(e.get("country"))
+            region_visitors.setdefault(label, set()).add(ip_hash)
         ts = _as_dt(e.get("ts"))
         if ts is None:
             continue
@@ -4303,6 +4436,10 @@ async def admin_analytics_summary(days: int = 7, admin=Depends(_current_admin)):
             "item_id": e.get("item_id"),
             "item_name": e.get("item_name"),
             "qty": e.get("qty"),
+            "source": e.get("source"),
+            "city": e.get("city"),
+            "region": e.get("region"),
+            "country": e.get("country"),
             # Random session ids are not PII, but only a prefix is needed
             # to correlate a visitor's recent actions in the table.
             "session": sess[:8] if sess else None,
@@ -4329,6 +4466,9 @@ async def admin_analytics_summary(days: int = 7, admin=Depends(_current_admin)):
         "window_start": start.isoformat(),
         "window_end": now.isoformat(),
         "sessions": len(sessions),
+        "unique_visitors": len(visitors),
+        "by_source": sorted([{"source": k, "page_views": v} for k, v in by_source.items()], key=lambda r: -r["page_views"]),
+        "by_region": sorted([{"region": k, "visitors": len(v)} for k, v in region_visitors.items()], key=lambda r: -r["visitors"])[:10],
         "page_views": counts["page_view"],
         "cart_views": counts["cart_view"],
         "cart_adds": counts["cart_add"],
