@@ -4247,6 +4247,8 @@ async def _analytics_attach_geo(ip: str, ip_hash: str, eid: str) -> None:
         if patch:
             await db.analytics_events.update_one({"eid": eid}, {"$set": patch})
     except Exception:
+        # Never break ingest: log and leave the event without geo.
+        log.exception("analytics geo lookup failed")
         return
 
 

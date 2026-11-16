@@ -41,6 +41,17 @@ CREATE INDEX IF NOT EXISTS analytics_events_doc_gin
 CREATE INDEX IF NOT EXISTS analytics_events_type_ts
     ON analytics_events ((doc ->> 'type'), (doc ->> 'ts'));
 
+-- ------------------------------------------------------- ip_geo_cache
+-- One row per hashed visitor IP: GeoIP result for the analytics
+-- ip_hash (city/region/country). Raw IPs are never stored anywhere.
+CREATE TABLE IF NOT EXISTS ip_geo_cache (
+    ledger_id TEXT PRIMARY KEY,  -- surrogate; docs carry no business ID
+    seq BIGSERIAL,
+    doc JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ip_geo_cache_doc_gin
+    ON ip_geo_cache USING GIN (doc);
+
 -- ------------------------------------------------------ business_settings
 CREATE TABLE IF NOT EXISTS business_settings (
     key TEXT PRIMARY KEY,

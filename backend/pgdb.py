@@ -75,6 +75,7 @@ TABLES = {
     ),
     "export_files": (["token"], ["created_at", "expires_at"]),
     "grocery": (["item_id"], ["created_at", "updated_at"]),
+    "ip_geo_cache": ([], ["ts"]),  # surrogate PK column: ledger_id
     "master_menu": (["item_id"], ["created_at", "updated_at"]),
     "orders": (
         ["order_id"],
