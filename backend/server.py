@@ -4095,7 +4095,7 @@ async def admin_stats(admin=Depends(_current_admin)):
         {"$group": {"_id": None, "sum": {"$sum": "$total_cents"}}},
     ]
     agg = await db.orders.aggregate(pipe).to_list(1)
-    revenue_cents = (agg[0]["sum"] if agg else 0) or 0
+    revenue_cents = (agg[0].get("sum", 0) if agg else 0) or 0
     # Stripe fees kept by Stripe on paid card payments. payment_transactions
     # rows exist only for card checkouts; rows without a captured fee
     # (older paid rows, or a failed fee fetch) contribute 0 to the sum.
@@ -4104,7 +4104,7 @@ async def admin_stats(admin=Depends(_current_admin)):
         {"$group": {"_id": None, "sum": {"$sum": "$stripe_fee_cents"}}},
     ]
     fee_agg = await db.payment_transactions.aggregate(fee_pipe).to_list(1)
-    stripe_fees_cents = (fee_agg[0]["sum"] if fee_agg else 0) or 0
+    stripe_fees_cents = (fee_agg[0].get("sum", 0) if fee_agg else 0) or 0
     return {
         "total_orders": total_orders,
         "delivered": delivered,

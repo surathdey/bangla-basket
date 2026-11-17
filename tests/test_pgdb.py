@@ -360,6 +360,19 @@ def test_aggregates():
                 {"$group": {"_id": None, "sum": {"$sum": "$total_cents"}}},
             ]).to_list(1)
             assert agg == [{"_id": None, "sum": 1700}]
+            # Regression (live Nov 16): a $group $sum over docs whose
+            # field is missing must still carry the key (sum 0) — the
+            # admin /stats fee aggregate crashed with KeyError: 'sum'
+            # when the only paid payment_transactions row had no
+            # stripe_fee_cents.
+            await db.payment_transactions.insert_one(
+                {"session_id": "cs_test_no_fee", "status": "paid",
+                 "created_at": NOW})
+            fee_agg = await db.payment_transactions.aggregate([
+                {"$match": {"status": "paid"}},
+                {"$group": {"_id": None, "sum": {"$sum": "$stripe_fee_cents"}}},
+            ]).to_list(1)
+            assert fee_agg == [{"_id": None, "sum": 0}]
             # Per-user stats: $sort then $group with $sum + $first.
             stats = {}
             async for row in db.orders.aggregate([

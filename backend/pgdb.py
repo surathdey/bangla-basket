@@ -1000,6 +1000,15 @@ def _agg_group(docs, spec: dict):
         marker = ("__none__",) if key is None else ("__val__", key)
         if marker not in groups:
             groups[marker] = {"_id": key}
+            # $sum accumulators start at 0 even when no doc contributes a
+            # numeric value (Mongo semantics) — otherwise the key is
+            # missing entirely and callers indexing ["sum"] crash. Live
+            # Nov 16: the only paid payment_transactions row had no
+            # stripe_fee_cents, so admin /stats died with KeyError: 'sum'.
+            for out_field, acc in spec.items():
+                if (out_field != "_id" and isinstance(acc, dict)
+                        and "$sum" in acc):
+                    groups[marker][out_field] = 0
             order.append(marker)
         out = groups[marker]
         for out_field, acc in spec.items():
