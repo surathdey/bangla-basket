@@ -162,7 +162,7 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#011838" },
+  root: { flex: 1, backgroundColor: "#011838", overflow: "hidden" },
   safeInner: { flex: 1, justifyContent: "space-between", padding: spacing.xl },
   brandRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   logoBadge: {

@@ -202,6 +202,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: radius.xl,
     overflow: "hidden",
+    // Must sit above the backdrop (same stacking context, both z-index
+    // auto would leave the absolutely-positioned backdrop on top and the
+    // card's buttons unclickable). The card is position:relative, so this
+    // zIndex puts it above the backdrop.
+    zIndex: 1,
     ...shadows.card,
   },
   cardNarrow: { width: "94%" },
