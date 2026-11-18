@@ -135,8 +135,8 @@ export default function ShopAccount() {
         <View style={styles.streakCard} testID="account-streak">
           <Text style={styles.streakText}>
             {(user!.weekly_meal_streak || 0) === 0
-              ? "0 of 4 weekly meals — order 4 weekly meals and your 5th is 50% off."
-              : `${Math.min(user!.weekly_meal_streak || 0, 4)} of 4 weekly meals — ${Math.max(0, 4 - (user!.weekly_meal_streak || 0))} more and your 5th is 50% off.`}
+              ? "0 of 4 weekly meals — order 4 weekly meals and your 5th is FREE."
+              : `${Math.min(user!.weekly_meal_streak || 0, 4)} of 4 weekly meals — ${Math.max(0, 4 - (user!.weekly_meal_streak || 0))} more and your 5th is FREE.`}
           </Text>
         </View>
 

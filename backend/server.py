@@ -2465,18 +2465,18 @@ async def _record_loyalty_and_coupon(order: dict, user_id: str):
                 description="10% off groceries — thanks for referring a friend!",
                 per_customer_limit=1, usage_limit=1, applies_to="grocery_only",
                 owner_user_id=referrer_id).model_dump())
-    # Weekly-meal streak: 4 completed weekly-meal orders → 50% off the 5th.
+    # Weekly-meal streak: 4 completed weekly-meal orders → the 5th is FREE.
     snaps = order.get("items_snapshot") or []
     if any(l.get("kind") in ("menu", "weekly_package") for l in snaps):
         u = await db.users.find_one({"user_id": user_id}, {"_id": 0, "weekly_meal_streak": 1})
         if u is not None:
             streak = int(u.get("weekly_meal_streak") or 0) + 1
             if streak >= 4:
-                mcode = f"MEAL50{_secrets.randbelow(9000) + 1000}"
+                mcode = f"MEALFREE{_secrets.randbelow(9000) + 1000}"
                 while await db.coupons.find_one({"code": mcode}):
-                    mcode = f"MEAL50{_secrets.randbelow(9000) + 1000}"
-                await db.coupons.insert_one(Coupon(code=mcode, discount_type="percent", value=50, active=True,
-                    description="50% off your 5th weekly meal — thanks for 4 in a row!",
+                    mcode = f"MEALFREE{_secrets.randbelow(9000) + 1000}"
+                await db.coupons.insert_one(Coupon(code=mcode, discount_type="percent", value=100, active=True,
+                    description="Your 5th weekly meal is FREE — thanks for 4 in a row!",
                     per_customer_limit=1, usage_limit=1, applies_to="weekly_meal_only",
                     owner_user_id=user_id).model_dump())
                 streak = 0
