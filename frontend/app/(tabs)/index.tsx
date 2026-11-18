@@ -11,10 +11,11 @@ import { useAuth } from "@/src/auth";
 import { useCart } from "@/src/cart";
 import { api } from "@/src/api";
 import { mediaUrl } from "@/src/utils/backendUrl";
-import { colors, spacing, radius, shadows } from "@/src/theme";
+import { colors, spacing, radius, shadows, fonts } from "@/src/theme";
 import { centsToCAD, isOrderingWindow, upcomingDeliveryDates } from "@/src/utils/format";
 import { LocationBanner } from "@/src/components/LocationBanner";
 import { PriceGate } from "@/src/components/PriceGate";
+import { OffersPopup } from "@/src/components/OffersPopup";
 
 const CIRCLE_LOGO = require("@/assets/brand/logo-circle.png");
 
@@ -58,6 +59,26 @@ export default function HomeScreen() {
   const [locBanner, setLocBanner] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Offers pop-up: shows once per browser session on homepage load.
+  // (Uses globalThis — the local `window` variable below is the ordering
+  // window, not the browser window.)
+  const offersSession = () => {
+    try {
+      return (globalThis as any).sessionStorage as Storage | undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const [offersVisible, setOffersVisible] = useState(false);
+  const dismissOffers = () => {
+    setOffersVisible(false);
+    offersSession()?.setItem("bb_offers_dismissed", "1");
+  };
+  useEffect(() => {
+    if (Platform.OS === "web" && !offersSession()?.getItem("bb_offers_dismissed")) {
+      setOffersVisible(true);
+    }
+  }, []);
   const window = isOrderingWindow(orderingDays);
   const deliveryDrops = upcomingDeliveryDates(deliveryDays);
 
@@ -183,6 +204,19 @@ export default function HomeScreen() {
             </View>
           </View>
         </ImageBackground>
+
+        {/* Reopen the offers pop-up after it was dismissed */}
+        {!offersVisible && (
+          <TouchableOpacity
+            testID="home-view-offers"
+            activeOpacity={0.8}
+            onPress={() => setOffersVisible(true)}
+            style={styles.offersPill}
+          >
+            <Ionicons name="gift" size={16} color={colors.primary} />
+            <Text style={styles.offersPillText}>View offers</Text>
+          </TouchableOpacity>
+        )}
 
         {/* Weekly Package hero */}
         {current?.package_enabled && current.package && (
@@ -486,6 +520,7 @@ export default function HomeScreen() {
 
         <View style={{ height: 20 }} />
       </ScrollView>
+      <OffersPopup visible={offersVisible} onClose={dismissOffers} />
     </View>
   );
 }
@@ -522,6 +557,21 @@ const styles = StyleSheet.create({
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, alignItems: "center" },
   deliveryChip: { backgroundColor: "rgba(255,255,255,0.18)", borderWidth: 1, borderColor: "rgba(255,255,255,0.35)" },
   deliveryChipText: { color: "#fff", fontSize: 12, fontWeight: "700" },
+  offersPill: {
+    flexDirection: "row",
+    alignSelf: "center",
+    alignItems: "center",
+    gap: 6,
+    marginTop: spacing.xl,
+    paddingHorizontal: 16,
+    height: 44,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.soft,
+  },
+  offersPillText: { fontFamily: fonts.body, fontSize: 13, fontWeight: "700", color: colors.primary },
 
   section: { marginTop: spacing.xl + 8 },
   // Home Package Hero
