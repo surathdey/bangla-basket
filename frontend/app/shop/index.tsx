@@ -20,6 +20,7 @@ import { usePricingLocation } from "@/src/location";
 import { ShopHeader } from "@/src/components/ShopHeader";
 import { ShopFooter } from "@/src/components/ShopFooter";
 import { PriceGate } from "@/src/components/PriceGate";
+import { OffersPopup } from "@/src/components/OffersPopup";
 import type { Grocery } from "../(tabs)/groceries";
 
 type AnytimeItem = { item_id: string; name: string; description?: string; price_cents: number; image_url?: string };
@@ -56,6 +57,27 @@ export default function ShopHome() {
   const { postal, gated, showHelp } = usePricingLocation();
   const isNarrow = width < 900;
   const contentWidth = Math.min(width, 1200);
+
+  // Offers pop-up: same component + same once-per-session rule as the
+  // homepage (shared sessionStorage key "bb_offers_dismissed" — dismissing
+  // it on one page means it does not re-appear on the other this session).
+  const offersSession = () => {
+    try {
+      return (globalThis as any).sessionStorage as Storage | undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const [offersVisible, setOffersVisible] = useState(false);
+  const dismissOffers = () => {
+    setOffersVisible(false);
+    offersSession()?.setItem("bb_offers_dismissed", "1");
+  };
+  useEffect(() => {
+    if (Platform.OS === "web" && !offersSession()?.getItem("bb_offers_dismissed")) {
+      setOffersVisible(true);
+    }
+  }, []);
 
   // Anonymous launch analytics — page view, fire-and-forget.
   useEffect(() => { track("page_view", { path: "/shop" }); }, []);
@@ -113,6 +135,21 @@ export default function ShopHome() {
           delivery: () => scrollToSection(deliveryY),
         }}
       />
+
+      {/* Reopen the offers pop-up after it was dismissed */}
+      {!offersVisible && (
+        <View style={{ width: "100%", alignItems: "center", backgroundColor: CREAM, paddingTop: 12 }}>
+          <TouchableOpacity
+            testID="shop-view-offers"
+            activeOpacity={0.8}
+            onPress={() => setOffersVisible(true)}
+            style={styles.offersPill}
+          >
+            <Ionicons name="gift" size={16} color={BLUE} />
+            <Text style={styles.offersPillText}>View offers</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <ScrollView ref={scrollRef} contentContainerStyle={{ paddingBottom: 40 + insets.bottom, alignItems: "center" }}>
         {/* HERO */}
@@ -310,6 +347,7 @@ export default function ShopHome() {
         {/* FOOTER */}
         <ShopFooter />
       </ScrollView>
+      <OffersPopup visible={offersVisible} onClose={dismissOffers} />
     </View>
   );
 }
@@ -317,6 +355,20 @@ export default function ShopHome() {
 const styles = StyleSheet.create({
   announce: { backgroundColor: RED, alignItems: "center", justifyContent: "center", paddingVertical: 7, paddingHorizontal: spacing.lg },
   announceText: { color: "#fff", fontSize: 12.5, fontWeight: "700", letterSpacing: 0.2 },
+
+  offersPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 16,
+    height: 44,
+    borderRadius: radius.pill,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#F0E6D8",
+    ...shadows.soft,
+  },
+  offersPillText: { fontSize: 13, fontWeight: "700", color: BLUE },
 
   logoCircle: { backgroundColor: "#fff", borderColor: BLUE, alignItems: "center", justifyContent: "center", overflow: "hidden" },
 

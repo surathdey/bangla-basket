@@ -5,9 +5,11 @@
  * System fonts, brand navy/gold, site radii/spacing/shadows. No new font,
  * no new palette — the pop-up must look like it belongs to banglabasket.ca.
  *
- * Behaviour: shows on homepage load (once per browser session — dismissal is
- * remembered in sessionStorage); closes via X, "Maybe later", backdrop tap,
- * or Esc (web). "Start shopping" closes it and goes to the grocery storefront.
+ * Behaviour: shows on homepage / shop / login load (once per browser
+ * session — dismissal is remembered in sessionStorage); closes via X,
+ * backdrop tap, or Esc (web). "Shop now" closes it and goes to /shop
+ * (if already on /shop it just closes). No "Maybe later" — the only
+ * call-to-action is "Shop now".
  */
 import React, { useEffect } from "react";
 import {
@@ -23,7 +25,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import Ionicons from "@react-native-vector-icons/ionicons";
-import { useRouter } from "expo-router";
+import { useRouter, usePathname } from "expo-router";
 import { colors, radius, spacing, shadows, fonts } from "@/src/theme";
 
 const IMG_GROCERY = require("@/assets/offers/grocery.jpg");
@@ -79,6 +81,7 @@ const OFFERS: Offer[] = [
 
 export function OffersPopup({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { width } = useWindowDimensions();
   const isNarrow = width < 480;
 
@@ -92,9 +95,12 @@ export function OffersPopup({ visible, onClose }: { visible: boolean; onClose: (
     return () => window.removeEventListener("keydown", onKey);
   }, [visible, onClose]);
 
-  const startShopping = () => {
+  // "Shop now" — the only call-to-action. Goes to /shop; if the visitor
+  // is already on /shop it just closes the pop-up.
+  const shopNow = () => {
     onClose();
-    router.push("/(tabs)/groceries");
+    if (pathname && pathname.startsWith("/shop")) return;
+    router.push("/shop");
   };
 
   return (
@@ -163,21 +169,13 @@ export function OffersPopup({ visible, onClose }: { visible: boolean; onClose: (
 
           <View style={styles.footer}>
             <TouchableOpacity
-              onPress={startShopping}
-              testID="offers-start-shopping"
+              onPress={shopNow}
+              testID="offers-shop-now"
               style={styles.primaryBtn}
               activeOpacity={0.9}
             >
-              <Text style={styles.primaryBtnText}>Start shopping</Text>
+              <Text style={styles.primaryBtnText}>Shop now</Text>
               <Ionicons name="arrow-forward" size={16} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={onClose}
-              testID="offers-maybe-later"
-              style={styles.laterBtn}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.laterBtnText}>Maybe later</Text>
             </TouchableOpacity>
             <Text style={styles.terms}>
               First-order 20% applies to groceries only and is auto-applied at checkout. Hilsa is free
@@ -300,8 +298,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
   },
   primaryBtnText: { fontFamily: fonts.body, color: "#fff", fontSize: 15, fontWeight: "800" },
-  laterBtn: { height: 44, alignItems: "center", justifyContent: "center" },
-  laterBtnText: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 14, fontWeight: "700" },
   terms: {
     fontFamily: fonts.body,
     fontSize: 11,

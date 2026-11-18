@@ -1,6 +1,6 @@
 import React from "react";
 import {
-  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Image,
+  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Image, Platform,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
@@ -10,6 +10,7 @@ import { useAuth } from "@/src/auth";
 import { spacing, radius, shadows } from "@/src/theme";
 import { BRAND } from "@/src/brand";
 import { EmailAuthModal } from "@/src/components/EmailAuthModal";
+import { OffersPopup } from "@/src/components/OffersPopup";
 
 const LOGO = require("../assets/brand/logo-circle.png");
 const LOGIN_BG = require("../assets/brand/hero-fresh.jpg");
@@ -29,6 +30,31 @@ export default function LoginScreen() {
   React.useEffect(() => {
     if (!loading && user) router.replace("/(tabs)");
   }, [loading, user, router]);
+
+  // Offers pop-up: the login screen is what a logged-out visitor lands on
+  // when they open banglabasket.ca, so the pop-up is mounted here too —
+  // same component, same once-per-session rule (shared sessionStorage key
+  // "bb_offers_dismissed" as the homepage / shop mounts). Gated on auth
+  // resolving to logged-out, so logged-in visitors redirect to the homepage
+  // (where the pop-up shows) without a flash here.
+  const offersSession = () => {
+    try {
+      return (globalThis as any).sessionStorage as Storage | undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const [offersVisible, setOffersVisible] = React.useState(false);
+  const dismissOffers = () => {
+    setOffersVisible(false);
+    offersSession()?.setItem("bb_offers_dismissed", "1");
+  };
+  React.useEffect(() => {
+    if (loading || user) return;
+    if (Platform.OS === "web" && !offersSession()?.getItem("bb_offers_dismissed")) {
+      setOffersVisible(true);
+    }
+  }, [loading, user]);
 
   const onSignIn = async () => {
     setSigningIn(true);
@@ -130,6 +156,7 @@ export default function LoginScreen() {
         </View>
       </SafeAreaView>
       <EmailAuthModal visible={emailOpen} onClose={() => setEmailOpen(false)} onSuccess={() => { setEmailOpen(false); router.replace("/(tabs)"); }} />
+      <OffersPopup visible={offersVisible} onClose={dismissOffers} />
     </View>
   );
 }
